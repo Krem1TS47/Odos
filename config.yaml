@@ -1,0 +1,32 @@
+model:
+  name: "VERIFY_IN_DOCS"        # Gemini computer-use model ID
+  temperature: 0.2
+
+browser:
+  channel: "chrome"             # use installed Chrome
+  headless: false               # must stay false
+  user_data_dir: "data/browser_profile"
+  viewport: { width: 1280, height: 900 }
+  slow_mo_ms: 150               # small delay between actions
+
+limits:
+  max_turns: 40                 # hard cap on agent loop iterations per run
+  max_runtime_seconds: 900
+  max_applications_per_session: 3
+
+safety:
+  allowed_domains: []           # e.g. ["boards.greenhouse.io", "jobs.lever.co"]; empty = prompt me per new domain
+  require_confirm_before_submit: true     # must stay true
+  require_confirm_on:
+    - "submit"
+    - "send application"
+    - "payment"
+    - "delete"
+  blocked_actions: []
+
+paths:
+  profile: "data/profile.yaml"
+  answers: "data/answers.yaml"
+  resumes_dir: "data/resumes"
+  runs_dir: "data/runs"
+  tracker_db: "data/tracker.db"

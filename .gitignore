@@ -1,0 +1,14 @@
+# Secrets
+.env
+
+# User data
+data/
+
+# Python cache & virtual environment
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
