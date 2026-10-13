@@ -15,7 +15,9 @@ A local command-line tool using the Gemini Computer Use model and Playwright to 
 
 ---
 
-## Installation & Setup
+## One-Time Setup
+
+Perform these steps once when setting up the project on your machine.
 
 ### 1. Clone & Navigate to Repository
 ```bash
@@ -23,65 +25,115 @@ git clone <repo-url>
 cd Odos
 ```
 
-### 2. Set Up Virtual Environment
+### 2. Create Virtual Environment
 ```bash
 python -m venv .venv
-
-# On Windows (PowerShell):
-.venv\Scripts\Activate.ps1
-
-# On macOS/Linux:
-source .venv/bin/activate
 ```
 
 ### 3. Install Package & Dependencies
-```bash
-# Editable install with dev dependencies (pytest)
-pip install -e ".[dev]"
+Activate the virtual environment first to install dependencies inside it:
 
-# Install Playwright browser binaries
+**On Windows (PowerShell):**
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+**On macOS/Linux:**
+```bash
+source .venv/bin/activate
+```
+
+Then install the package (in editable mode with dev dependencies) and download Playwright browser binaries:
+```bash
+pip install -e ".[dev]"
 playwright install chromium
 ```
 
-### 4. Configure Secrets
-Copy `.env.example` to `.env` and fill in your Gemini API key:
+### 4. Configure Secrets (.env)
+Copy `.env.example` to `.env` and set your Gemini API key:
+
+**On Windows (PowerShell):**
+```powershell
+Copy-Item .env.example .env
+```
+
+**On macOS/Linux:**
 ```bash
 cp .env.example .env
 ```
-In `.env`:
+
+Inside `.env`:
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-### 5. Configure Profile and Answers
-Ensure `data/profile.yaml` and `data/answers.yaml` are populated with your information:
-- Edit `data/profile.yaml` with your personal contact info, work authorization, education, and experience.
-- Place your PDF resume in `data/resumes/resume.pdf` (or update `resumes.default` in `data/profile.yaml`).
-- Edit `data/answers.yaml` with your reusable answers.
+### 5. Configure Profile, Resume, and Answers
+Set up your personal data inside the `data/` directory:
+- **Profile:** Edit `data/profile.yaml` with your contact details, work authorization, education, and experience.
+- **Resume:** Place your resume PDF in `data/resumes/` (e.g., `data/resumes/resume.pdf` or update `config.yaml`).
+- **Answers:** Edit `data/answers.yaml` with answers to common job application questions.
 
 ---
 
-## CLI Commands
+## Running the Application (Every Time)
+
+Run these commands each time you want to boot and use Odos in a new terminal session.
+
+### 1. Activate Virtual Environment
+Open your terminal in the project root directory and activate the virtual environment:
+
+**On Windows (PowerShell):**
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+**On macOS/Linux:**
+```bash
+source .venv/bin/activate
+```
+
+### 2. Run Odos Commands
+
+#### Validate Configuration (Optional Sanity Check)
+```bash
+jobassist check-config
+```
+
+#### Launch the Job Application Assistant
+Start the assistant to fill out a job application at a target URL:
+```bash
+jobassist run <job_url>
+```
+
+Options:
+- `--dry-run`: Read-only mode to inspect the form without filling in fields.
+- `--resume <path>` / `-r <path>`: Override the default resume file for this run.
 
 ```bash
-# View help and available commands
-jobassist --help
+# Example: Dry-run inspection
+jobassist run https://example.com/jobs/123 --dry-run
 
-# Validate configuration and profile files (M1)
-jobassist check-config
-
-# Open browser to log in manually and persist session cookies (M2)
-jobassist login
-
-# Run form filling assistant on a job URL (M3/M4)
-jobassist run <job_url> [--dry-run] [--resume <path>]
-
-# List tracked applications (M6)
-jobassist list
-
-# Mark application status (M6)
-jobassist mark <id> <status>
+# Example: Run with a specific resume
+jobassist run https://example.com/jobs/123 --resume data/resumes/resume.pdf
 ```
+
+#### Additional Session Commands
+- **Manual Login Session:** Open a persistent Chrome session to log in to job boards and save cookies:
+  ```bash
+  jobassist login
+  ```
+- **List Tracked Applications:** View logged applications and their statuses:
+  ```bash
+  jobassist list
+  ```
+- **Update Application Status:** Update the status of an application (e.g., `filled`, `submitted`, `abandoned`, `error`):
+  ```bash
+  jobassist mark <id> <status>
+  ```
+- **Help Menu:**
+  ```bash
+  jobassist --help
+  ```
 
 ---
 
