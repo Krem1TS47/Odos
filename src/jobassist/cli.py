@@ -9,6 +9,7 @@ from rich.table import Table
 
 from jobassist.config import load_config, ConfigError
 from jobassist.profile import load_profile, load_answers, ProfileError, AnswersError
+from jobassist.browser import BrowserSession
 
 app = typer.Typer(
     name="jobassist",
@@ -95,6 +96,8 @@ def check_config(
                 details.append("[yellow]No email set[/yellow]")
             auth = ", ".join(profile.work_authorization.authorized_to_work_in) if profile.work_authorization.authorized_to_work_in else "None specified"
             details.append(f"Work auth: [{auth}]")
+            details.append(f"18+: {profile.disclosures.at_least_18_years_of_age}")
+            details.append(f"Gov official: {profile.disclosures.is_government_official}")
 
             table.add_row(
                 "Profile",
@@ -164,9 +167,41 @@ def check_config(
 
 
 @app.command("login")
-def login() -> None:
+def login(
+    config_path: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to config.yaml"),
+    url: Optional[str] = typer.Option(None, "--url", "-u", help="Initial URL to open for login"),
+) -> None:
     """Open a persistent Chrome browser session for manual login."""
-    console.print("[yellow]login will be implemented in M2.[/yellow]")
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as e:
+        console.print(f"[bold red]Configuration error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    console.print(Panel.fit("[bold blue]JobAssist Persistent Browser Session[/bold blue]"))
+    console.print(f"Opening browser with persistent profile at: [cyan]{cfg.browser.user_data_dir}[/cyan]")
+    console.print("Use this session to log in manually to job boards (LinkedIn, Greenhouse, Lever, etc.).")
+    console.print("[dim]Your session cookies and login state will be saved automatically when closed.[/dim]\n")
+
+    session = BrowserSession(config=cfg.browser, headless=False)
+    try:
+        page = session.start()
+        if url:
+            console.print(f"Navigating to [cyan]{url}[/cyan]...")
+            page.goto(url)
+        else:
+            page.goto("https://www.google.com")
+
+        console.print("[bold yellow]Browser window is active.[/bold yellow]")
+        console.input("[bold green]Press Enter when you have finished logging in to save and exit... [/bold green]")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted by user.[/yellow]")
+    except Exception as e:
+        console.print(f"\n[bold red]Browser error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+    finally:
+        session.close()
+        console.print("[bold green]Browser session saved and closed cleanly.[/bold green]")
 
 
 @app.command("run")

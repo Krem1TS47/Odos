@@ -7,6 +7,8 @@ from jobassist.profile import (
     AnswersError,
     UserProfile,
     UserAnswers,
+    Disclosures,
+    Demographics,
 )
 
 
@@ -17,8 +19,38 @@ def test_load_default_profile():
     assert profile.personal.last_name == "Ching"
     assert "United States" in profile.work_authorization.authorized_to_work_in
     assert profile.preferences.willing_to_relocate is True
+    assert profile.disclosures.at_least_18_years_of_age is True
+    assert profile.disclosures.is_government_official is False
+    assert profile.disclosures.has_government_official_relative is False
+    assert isinstance(profile.demographics, Demographics)
     assert len(profile.education) > 0
     assert profile.education[0].school == "University of British Columbia"
+
+
+def test_disclosures_and_demographics_aliases(tmp_path):
+    custom_profile_file = tmp_path / "custom_profile.yaml"
+    custom_profile_file.write_text(
+        """
+personal:
+  first_name: "Test"
+legal:
+  is_18_or_older: true
+  government_official: true
+  relative_of_government_official: false
+eeoc:
+  race_ethnicity: "Asian"
+  disability: "No"
+  veteran: "I am not a veteran"
+        """,
+        encoding="utf-8",
+    )
+    profile = load_profile(custom_profile_file)
+    assert profile.disclosures.at_least_18_years_of_age is True
+    assert profile.disclosures.is_government_official is True
+    assert profile.disclosures.has_government_official_relative is False
+    assert profile.demographics.race == "Asian"
+    assert profile.demographics.disability_status == "No"
+    assert profile.demographics.veteran_status == "I am not a veteran"
 
 
 def test_load_default_answers():
@@ -56,8 +88,6 @@ def test_load_answers_invalid_type(tmp_path):
 
 def test_load_profile_invalid_schema(tmp_path):
     bad_schema = tmp_path / "bad_schema.yaml"
-    bad_schema.write_text("work_authorization:\n  requires_sponsorship: not_a_boolean_list_or_whatever", encoding="utf-8")
-    # Actually in pydantic requires_sponsorship="not_a_boolean" raises ValidationError
     bad_schema.write_text("education: not_a_list\n", encoding="utf-8")
     with pytest.raises(ProfileError, match="Invalid profile"):
         load_profile(bad_schema)

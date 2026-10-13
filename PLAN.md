@@ -167,6 +167,17 @@ preferences:
   willing_to_relocate: false
   remote_preference: ""
 
+disclosures:
+  at_least_18_years_of_age: true
+  is_government_official: false
+  has_government_official_relative: false
+
+demographics:
+  gender: ""
+  race: ""
+  disability_status: ""
+  veteran_status: ""
+
 education:
   - school: ""
     degree: ""

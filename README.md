@@ -141,7 +141,7 @@ jobassist run https://example.com/jobs/123 --resume data/resumes/resume.pdf
 
 - [x] **M0: Scaffold** - Repository structure, packaging, templates, CLI skeleton
 - [x] **M1: Config & Profile Loading** - Pydantic validation for config and profile YAML
-- [ ] **M2: Browser Session** - Persistent Chrome session via Playwright
+- [x] **M2: Browser Session** - Persistent Chrome session via Playwright
 - [ ] **M3: Agent Loop (Read-Only)** - Gemini computer-use loop, screenshot & dry-run inspection
 - [ ] **M4: Form Filling** - Fill actions (click, type, select, upload) using stored profile
 - [ ] **M5: Safety Gates** - Domain allowlists, confirmation prompts, review before submit

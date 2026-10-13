@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Dict, List
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
 
 class ProfileError(Exception):
@@ -55,6 +55,52 @@ class Preferences(BaseModel):
     remote_preference: str = ""
 
 
+class Disclosures(BaseModel):
+    """Legal, compliance, and conflict-of-interest disclosures."""
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    at_least_18_years_of_age: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("at_least_18_years_of_age", "is_18_or_older", "age_18_or_older"),
+    )
+    is_government_official: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("is_government_official", "government_official"),
+    )
+    has_government_official_relative: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "has_government_official_relative",
+            "relative_of_government_official",
+            "relatives_with_government_official",
+            "relatives_government_official",
+            "relative_government_official",
+        ),
+    )
+
+
+class Demographics(BaseModel):
+    """Voluntary self-identification / EEOC information."""
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    race: str = Field(
+        default="",
+        validation_alias=AliasChoices("race", "race_ethnicity", "ethnicity"),
+    )
+    gender: str = Field(
+        default="",
+        validation_alias=AliasChoices("gender", "sex"),
+    )
+    disability_status: Any = Field(
+        default="",
+        validation_alias=AliasChoices("disability_status", "disability"),
+    )
+    veteran_status: Any = Field(
+        default="",
+        validation_alias=AliasChoices("veteran_status", "veteran"),
+    )
+
+
 class EducationItem(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -82,11 +128,19 @@ class ResumesConfig(BaseModel):
 
 
 class UserProfile(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     personal: PersonalInfo = Field(default_factory=PersonalInfo)
     work_authorization: WorkAuthorization = Field(default_factory=WorkAuthorization)
     preferences: Preferences = Field(default_factory=Preferences)
+    disclosures: Disclosures = Field(
+        default_factory=Disclosures,
+        validation_alias=AliasChoices("disclosures", "legal", "background"),
+    )
+    demographics: Demographics = Field(
+        default_factory=Demographics,
+        validation_alias=AliasChoices("demographics", "eeoc", "self_identification"),
+    )
     education: List[EducationItem] = Field(default_factory=list)
     experience: List[ExperienceItem] = Field(default_factory=list)
     resumes: ResumesConfig = Field(default_factory=ResumesConfig)
