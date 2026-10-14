@@ -10,6 +10,7 @@ from rich.table import Table
 from jobassist.config import load_config, ConfigError
 from jobassist.profile import load_profile, load_answers, ProfileError, AnswersError
 from jobassist.browser import BrowserSession
+from jobassist.agent import run_dry_run_agent, run_form_filling_agent, AgentError
 
 app = typer.Typer(
     name="jobassist",
@@ -209,9 +210,104 @@ def run(
     job_url: str = typer.Argument(..., help="Target job application URL"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Read-only mode: inspect form without filling"),
     resume: Optional[Path] = typer.Option(None, "--resume", "-r", help="Path to resume file override"),
+    config_path: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to config.yaml"),
+    headless: bool = typer.Option(False, "--headless", help="Run browser in headless mode"),
 ) -> None:
     """Run the job application assistant on a given job application URL."""
-    console.print(f"[yellow]run for {job_url} will be implemented in M3/M4.[/yellow]")
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as e:
+        console.print(f"[bold red]Configuration error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    load_dotenv()
+    if not os.getenv("GEMINI_API_KEY", "").strip():
+        console.print("[bold red]GEMINI_API_KEY is not configured in .env. Please run 'jobassist check-config'.[/bold red]")
+        raise typer.Exit(code=1)
+
+    mode_label = "Dry-Run / Inspection" if dry_run else "Interactive Form Filling"
+    console.print(Panel.fit(f"[bold blue]JobAssist Agent Run ({mode_label})[/bold blue]"))
+    console.print(f"Target URL: [cyan]{job_url}[/cyan]")
+    console.print(f"Model: [cyan]{cfg.model.name}[/cyan] | Max turns: [cyan]{cfg.limits.max_turns}[/cyan]\n")
+
+    profile = None
+    answers = None
+    if not dry_run:
+        try:
+            profile = load_profile(cfg.paths.profile)
+            answers = load_answers(cfg.paths.answers)
+        except (ProfileError, AnswersError) as e:
+            console.print(f"[bold red]Profile / Answers error:[/bold red] {e}")
+            raise typer.Exit(code=1)
+        applicant_name = f"{profile.personal.first_name} {profile.personal.last_name}".strip()
+        console.print(f"Candidate: [bold]{applicant_name}[/bold] ({profile.personal.email})\n")
+
+    session = BrowserSession(config=cfg.browser, headless=headless)
+    try:
+        page = session.start()
+
+        def on_turn_update(turn: int, msg: str) -> None:
+            console.print(f"[blue]>[/blue] {msg}")
+
+        def on_ask_user(question: str, field_name: str) -> str:
+            console.print(f"\n[bold yellow]Agent asks ({field_name}):[/bold yellow] {question}")
+            return console.input("[bold cyan]Your answer: [/bold cyan]").strip()
+
+        if dry_run:
+            result = run_dry_run_agent(page, job_url, cfg, on_turn=on_turn_update)
+            console.print(f"\n[bold green]Inspection Complete! ({result.status})[/bold green]")
+        else:
+            result = run_form_filling_agent(
+                page=page,
+                job_url=job_url,
+                config=cfg,
+                profile=profile,
+                answers=answers,
+                resume_path=resume,
+                on_turn=on_turn_update,
+                on_ask_user=on_ask_user,
+            )
+            console.print(f"\n[bold green]Form Filling Complete! ({result.status})[/bold green]")
+
+        console.print(f"Turns: [bold]{result.turns}[/bold] | Duration: [bold]{result.duration_seconds}s[/bold]")
+        console.print(f"Artifacts saved to: [cyan]{result.run_dir}[/cyan]\n")
+
+        if dry_run and result.fields_found:
+            console.print("[bold cyan]Discovered Form Fields:[/bold cyan]")
+            for f in result.fields_found:
+                console.print(f"  * {f}")
+            console.print()
+
+        if not dry_run and result.fields_filled:
+            filled_table = Table(title="Fields Filled", show_lines=True)
+            filled_table.add_column("Field / Selector", style="cyan")
+            filled_table.add_column("Action", style="magenta")
+            filled_table.add_column("Value / Option")
+            for item in result.fields_filled:
+                filled_table.add_row(
+                    item.get("field", ""),
+                    item.get("action", ""),
+                    str(item.get("value", "")),
+                )
+            console.print(filled_table)
+            console.print()
+
+        if result.summary:
+            console.print(Panel(result.summary, title="[bold]Summary[/bold]", expand=False))
+
+        if not dry_run and not headless:
+            console.print("\n[bold yellow]Safety Gate: Odos never clicks Submit automatically.[/bold yellow]")
+            console.print("[bold green]Please review the filled application in the browser window and submit manually.[/bold green]")
+            console.input("[dim]Press Enter to close the browser session and exit... [/dim]")
+
+    except AgentError as e:
+        console.print(f"\n[bold red]Agent error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+    except Exception as e:
+        console.print(f"\n[bold red]Unexpected error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+    finally:
+        session.close()
 
 
 @app.command("list")

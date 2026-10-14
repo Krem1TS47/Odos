@@ -230,3 +230,68 @@ def load_answers(path: Path | str = "data/answers.yaml") -> UserAnswers:
             loc = " -> ".join(str(p) for p in err["loc"])
             errors.append(f"{loc}: {err['msg']}")
         raise AnswersError(f"Invalid answers in {answers_path}:\n" + "\n".join(f"  - {msg}" for msg in errors)) from e
+
+
+def format_profile_context(profile: UserProfile, answers: UserAnswers) -> str:
+    """Format user profile and answers into structured text context for the agent prompt."""
+    lines = [
+        "### CANDIDATE PROFILE DATA",
+        "Personal Information:",
+        f"  First Name: {profile.personal.first_name}",
+        f"  Last Name: {profile.personal.last_name}",
+        f"  Full Name: {profile.personal.first_name} {profile.personal.last_name}".strip(),
+        f"  Email: {profile.personal.email}",
+        f"  Phone Area Code: {profile.personal.area}",
+        f"  Phone Number: {profile.personal.phone}",
+        f"  Full Phone: {profile.personal.area} {profile.personal.phone}".strip(),
+        f"  City: {profile.personal.location.city}",
+        f"  State/Region: {profile.personal.location.state or profile.personal.location.region}",
+        f"  Country: {profile.personal.location.country}",
+        f"  LinkedIn: {profile.personal.linkedin}",
+        f"  GitHub: {profile.personal.github}",
+        f"  Portfolio: {profile.personal.portfolio}",
+        "",
+        "Work Authorization:",
+        f"  Authorized to work in: {', '.join(profile.work_authorization.authorized_to_work_in)}",
+        f"  Requires sponsorship now or in future: {profile.work_authorization.requires_sponsorship}",
+        "",
+        "Legal & Compliance Disclosures:",
+        f"  At least 18 years of age: {profile.disclosures.at_least_18_years_of_age}",
+        f"  Is government official: {profile.disclosures.is_government_official}",
+        f"  Has government official relative: {profile.disclosures.has_government_official_relative}",
+        "",
+        "Demographics & Equal Employment Opportunity (EEOC):",
+        f"  Race / Ethnicity: {profile.demographics.race}",
+        f"  Gender: {profile.demographics.gender}",
+        f"  Disability Status: {profile.demographics.disability_status}",
+        f"  Veteran Status: {profile.demographics.veteran_status}",
+        "",
+        "Preferences:",
+        f"  Desired Salary: {profile.preferences.desired_salary}",
+        f"  Notice Period: {profile.preferences.notice_period}",
+        f"  Willing to relocate: {profile.preferences.willing_to_relocate}",
+        f"  Remote preference: {profile.preferences.remote_preference}",
+        "",
+        "Education:",
+    ]
+    for edu in profile.education:
+        lines.append(f"  - School: {edu.school}, Degree: {edu.degree}, Field: {edu.field}, Years: {edu.start} - {edu.end}")
+
+    lines.append("")
+    lines.append("Work Experience:")
+    for exp in profile.experience:
+        lines.append(f"  - Company: {exp.company}, Title: {exp.title}, Dates: {exp.start} - {exp.end}, Summary: {exp.summary}")
+
+    lines.append("")
+    lines.append("Reusable Answers & Templates:")
+    lines.append(f"  How did you hear about us: {answers.how_did_you_hear}")
+    if answers.why_interested_template:
+        lines.append(f"  Why interested: {answers.why_interested_template}")
+    if answers.strengths:
+        lines.append(f"  Strengths: {answers.strengths}")
+    if answers.biggest_achievement:
+        lines.append(f"  Biggest achievement: {answers.biggest_achievement}")
+    for k, v in answers.custom.items():
+        lines.append(f"  Custom question [{k}]: {v}")
+
+    return "\n".join(lines)
