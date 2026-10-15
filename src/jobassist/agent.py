@@ -5,7 +5,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -23,6 +23,12 @@ from jobassist.actions import (
 from jobassist.config import AppConfig
 from jobassist.logging_utils import create_run_dir, log_turn, save_screenshot, save_summary
 from jobassist.profile import UserAnswers, UserProfile, format_profile_context
+from jobassist.safety import (
+    DomainNotAllowedError,
+    check_action_safety,
+    detect_page_blockers,
+    ensure_domain_allowed,
+)
 
 
 class AgentError(Exception):
@@ -216,6 +222,9 @@ def run_dry_run_agent(
     config: AppConfig,
     run_dir: Optional[Path] = None,
     on_turn: Optional[Callable[[int, str], None]] = None,
+    session_allowed: Optional[Set[str]] = None,
+    on_confirm_domain: Optional[Callable[[str], bool]] = None,
+    on_confirm_action: Optional[Callable[[str, str], bool]] = None,
 ) -> AgentResult:
     """Execute the Gemini agent inspection loop on a target job application page."""
     load_dotenv()
@@ -225,6 +234,16 @@ def run_dry_run_agent(
 
     actual_run_dir = run_dir or create_run_dir(config.paths.runs_dir)
     actual_run_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Verify target domain is allowed before initiating browser navigation
+    if session_allowed is None:
+        session_allowed = set()
+    ensure_domain_allowed(
+        job_url,
+        config.safety.allowed_domains,
+        session_allowed=session_allowed,
+        prompt_fn=on_confirm_domain,
+    )
 
     model_name = config.model.name
     if not model_name or model_name == "VERIFY_IN_DOCS":
@@ -262,6 +281,16 @@ def run_dry_run_agent(
             status = "timeout"
             summary_text = f"Agent reached maximum runtime limit ({max_runtime}s)."
             log_turn(actual_run_dir, turn, "timeout", {"elapsed_seconds": elapsed})
+            break
+
+        # Check for CAPTCHA, bot challenges, or login walls
+        blocker = detect_page_blockers(page)
+        if blocker:
+            status = "blocked"
+            summary_text = f"Safety Gate: Execution paused. {blocker} Handing control over to user."
+            log_turn(actual_run_dir, turn, "page_blocker", {"blocker": blocker})
+            if on_turn:
+                on_turn(turn, f"[WARN] Safety Gate Alert: {blocker}")
             break
 
         if on_turn:
@@ -328,7 +357,15 @@ def run_dry_run_agent(
                 ])
             elif fc.name == "navigate":
                 nav_url = args.get("url", "")
-                nav_res = navigate(page, nav_url)
+                allowed, reason = check_action_safety("navigate", nav_url, config.safety, on_confirm_action)
+                if not allowed:
+                    nav_res = {"status": "blocked", "message": reason}
+                else:
+                    try:
+                        ensure_domain_allowed(nav_url, config.safety.allowed_domains, session_allowed, on_confirm_domain)
+                        nav_res = navigate(page, nav_url)
+                    except DomainNotAllowedError as e:
+                        nav_res = {"status": "blocked", "message": str(e)}
                 log_turn(actual_run_dir, turn, "navigate", nav_res)
                 chat.send_message([
                     types.Part.from_function_response(
@@ -377,6 +414,9 @@ def run_form_filling_agent(
     run_dir: Optional[Path] = None,
     on_turn: Optional[Callable[[int, str], None]] = None,
     on_ask_user: Optional[Callable[[str, str], str]] = None,
+    session_allowed: Optional[Set[str]] = None,
+    on_confirm_domain: Optional[Callable[[str], bool]] = None,
+    on_confirm_action: Optional[Callable[[str, str], bool]] = None,
 ) -> AgentResult:
     """Execute the Gemini agent form filling loop using stored profile, resume, and answers."""
     load_dotenv()
@@ -386,6 +426,16 @@ def run_form_filling_agent(
 
     actual_run_dir = run_dir or create_run_dir(config.paths.runs_dir)
     actual_run_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Verify target domain is allowed before initiating browser navigation
+    if session_allowed is None:
+        session_allowed = set()
+    ensure_domain_allowed(
+        job_url,
+        config.safety.allowed_domains,
+        session_allowed=session_allowed,
+        prompt_fn=on_confirm_domain,
+    )
 
     # Resolve resume file
     resolved_resume: Optional[Path] = None
@@ -437,6 +487,16 @@ def run_form_filling_agent(
             status = "timeout"
             summary_text = f"Agent reached maximum runtime limit ({max_runtime}s)."
             log_turn(actual_run_dir, turn, "timeout", {"elapsed_seconds": elapsed})
+            break
+
+        # Check for CAPTCHA, bot challenges, or login walls
+        blocker = detect_page_blockers(page)
+        if blocker:
+            status = "blocked"
+            summary_text = f"Safety Gate: Execution paused. {blocker} Handing control over to user."
+            log_turn(actual_run_dir, turn, "page_blocker", {"blocker": blocker})
+            if on_turn:
+                on_turn(turn, f"[WARN] Safety Gate Alert: {blocker}")
             break
 
         if on_turn:
@@ -491,6 +551,14 @@ def run_form_filling_agent(
             elif action_name == "type_text":
                 selector = args.get("selector", "")
                 text_val = args.get("text", "")
+                field_name = args.get("field_name", "")
+                details = f"{selector} {field_name} {text_val}".strip()
+                allowed, reason = check_action_safety("type_text", details, config.safety, on_confirm_action)
+                if not allowed:
+                    res = {"status": "blocked", "message": reason}
+                    log_turn(actual_run_dir, turn, "type_text_blocked", res, reason)
+                    chat.send_message([types.Part.from_function_response(name="type_text", response={"result": res})])
+                    continue
                 res = type_text(page, selector, text_val)
                 fields_filled.append({"field": selector, "value": text_val, "action": "type"})
                 log_turn(actual_run_dir, turn, "type_text", res)
@@ -499,6 +567,14 @@ def run_form_filling_agent(
             elif action_name == "select_option":
                 selector = args.get("selector", "")
                 option = args.get("option", "")
+                desc = args.get("description", "")
+                details = f"{selector} {desc} {option}".strip()
+                allowed, reason = check_action_safety("select_option", details, config.safety, on_confirm_action)
+                if not allowed:
+                    res = {"status": "blocked", "message": reason}
+                    log_turn(actual_run_dir, turn, "select_option_blocked", res, reason)
+                    chat.send_message([types.Part.from_function_response(name="select_option", response={"result": res})])
+                    continue
                 res = select_option(page, selector, option)
                 fields_filled.append({"field": selector, "value": option, "action": "select"})
                 log_turn(actual_run_dir, turn, "select_option", res)
@@ -506,6 +582,14 @@ def run_form_filling_agent(
 
             elif action_name == "click":
                 selector = args.get("selector", "")
+                desc = args.get("description", "")
+                details = f"{selector} {desc}".strip()
+                allowed, reason = check_action_safety("click", details, config.safety, on_confirm_action)
+                if not allowed:
+                    res = {"status": "blocked", "message": reason}
+                    log_turn(actual_run_dir, turn, "click_blocked", res, reason)
+                    chat.send_message([types.Part.from_function_response(name="click", response={"result": res})])
+                    continue
                 res = click(page, selector)
                 fields_filled.append({"field": selector, "action": "click"})
                 log_turn(actual_run_dir, turn, "click", res)
@@ -513,6 +597,13 @@ def run_form_filling_agent(
 
             elif action_name == "upload_resume":
                 selector = args.get("selector")
+                details = f"{selector or 'resume'} {resolved_resume}".strip()
+                allowed, reason = check_action_safety("upload_resume", details, config.safety, on_confirm_action)
+                if not allowed:
+                    res = {"status": "blocked", "message": reason}
+                    log_turn(actual_run_dir, turn, "upload_resume_blocked", res, reason)
+                    chat.send_message([types.Part.from_function_response(name="upload_resume", response={"result": res})])
+                    continue
                 if not resolved_resume:
                     res = {"status": "error", "message": "No resume file available to upload."}
                 else:

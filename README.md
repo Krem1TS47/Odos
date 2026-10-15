@@ -144,6 +144,6 @@ jobassist run https://example.com/jobs/123 --resume data/resumes/resume.pdf
 - [x] **M2: Browser Session** - Persistent Chrome session via Playwright
 - [x] **M3: Agent Loop (Read-Only)** - Gemini computer-use loop, screenshot & dry-run inspection
 - [x] **M4: Form Filling** - Fill actions (click, type, select, upload) using stored profile
-- [ ] **M5: Safety Gates** - Domain allowlists, confirmation prompts, review before submit
-- [ ] **M6: Tracker** - SQLite local job application tracker
+- [x] **M5: Safety Gates** - Domain allowlists, confirmation prompts, review before submit
+- [x] **M6: Tracker** - SQLite local job application tracker
 - [ ] **M7: Tests & Polish** - Unit tests, local test form, end-to-end polish

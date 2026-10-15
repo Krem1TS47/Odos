@@ -5,12 +5,20 @@ from dotenv import load_dotenv
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Confirm
 from rich.table import Table
 
 from jobassist.config import load_config, ConfigError
 from jobassist.profile import load_profile, load_answers, ProfileError, AnswersError
 from jobassist.browser import BrowserSession
 from jobassist.agent import run_dry_run_agent, run_form_filling_agent, AgentError
+from jobassist.safety import DomainNotAllowedError, ensure_domain_allowed
+from jobassist.tracker import (
+    ApplicationTracker,
+    VALID_STATUSES,
+    extract_job_details,
+    TrackerError,
+)
 
 app = typer.Typer(
     name="jobassist",
@@ -158,6 +166,42 @@ def check_config(
                 msg,
             )
 
+        # 5. Check Safety configuration
+        safety_items = []
+        if cfg.safety.allowed_domains:
+            safety_items.append(f"Allowed domains: {', '.join(cfg.safety.allowed_domains)}")
+        else:
+            safety_items.append("Allowed domains: None (prompts per domain)")
+        safety_items.append(f"Confirm submit: {cfg.safety.require_confirm_before_submit}")
+        if cfg.safety.require_confirm_on:
+            safety_items.append(f"Confirm triggers: [{', '.join(cfg.safety.require_confirm_on)}]")
+        table.add_row(
+            "Safety",
+            "safety",
+            "[green]OK[/green]",
+            "; ".join(safety_items),
+        )
+
+        # 6. Check Application Tracker database
+        tracker_path = cfg.paths.tracker_db
+        try:
+            tracker = ApplicationTracker(tracker_path)
+            total_apps = len(tracker.list_applications())
+            table.add_row(
+                "Tracker",
+                str(tracker_path),
+                "[green]OK[/green]",
+                f"SQLite database ready ({total_apps} applications tracked)",
+            )
+        except Exception as e:
+            has_errors = True
+            table.add_row(
+                "Tracker",
+                str(tracker_path),
+                "[red]ERROR[/red]",
+                f"Error initializing tracker: {e}",
+            )
+
     console.print(table)
 
     if has_errors:
@@ -210,6 +254,8 @@ def run(
     job_url: str = typer.Argument(..., help="Target job application URL"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Read-only mode: inspect form without filling"),
     resume: Optional[Path] = typer.Option(None, "--resume", "-r", help="Path to resume file override"),
+    company: Optional[str] = typer.Option(None, "--company", help="Company name (optional, auto-detected if omitted)"),
+    role: Optional[str] = typer.Option(None, "--role", help="Job role/title (optional, auto-detected if omitted)"),
     config_path: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to config.yaml"),
     headless: bool = typer.Option(False, "--headless", help="Run browser in headless mode"),
 ) -> None:
@@ -242,9 +288,44 @@ def run(
         applicant_name = f"{profile.personal.first_name} {profile.personal.last_name}".strip()
         console.print(f"Candidate: [bold]{applicant_name}[/bold] ({profile.personal.email})\n")
 
+    session_allowed: set[str] = set()
+
+    def on_confirm_domain(domain: str) -> bool:
+        console.print(f"\n[bold yellow]Safety Gate Alert:[/bold yellow] Target domain '[bold cyan]{domain}[/bold cyan]' is not in your configured allowed domains.")
+        return Confirm.ask("Do you want to allow navigation to this domain for this session?", default=False)
+
+    def on_confirm_action(action_name: str, details: str) -> bool:
+        console.print(f"\n[bold yellow]Safety Gate Alert:[/bold yellow] Action '[bold magenta]{action_name}[/bold magenta]' on [cyan]{details}[/cyan] requires confirmation.")
+        return Confirm.ask("Do you approve executing this action?", default=False)
+
+    # Pre-check domain allowlist before launching browser
+    try:
+        ensure_domain_allowed(job_url, cfg.safety.allowed_domains, session_allowed, on_confirm_domain)
+    except DomainNotAllowedError as e:
+        console.print(f"\n[bold red]Safety Gate Abort:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    run_status = "error"
+    run_notes = ""
+    run_dir_str = ""
+    run_company = (company or "").strip()
+    run_role = (role or "").strip()
+
     session = BrowserSession(config=cfg.browser, headless=headless)
     try:
         page = session.start()
+
+        # Attempt to infer company and role from URL and page title
+        try:
+            title_str = page.title() if hasattr(page, "title") and callable(page.title) else ""
+            if not isinstance(title_str, str):
+                title_str = ""
+        except Exception:
+            title_str = ""
+
+        det_comp, det_role = extract_job_details(job_url, title_str, run_company, run_role)
+        run_company = run_company or det_comp
+        run_role = run_role or det_role
 
         def on_turn_update(turn: int, msg: str) -> None:
             console.print(f"[blue]>[/blue] {msg}")
@@ -254,7 +335,25 @@ def run(
             return console.input("[bold cyan]Your answer: [/bold cyan]").strip()
 
         if dry_run:
-            result = run_dry_run_agent(page, job_url, cfg, on_turn=on_turn_update)
+            result = run_dry_run_agent(
+                page=page,
+                job_url=job_url,
+                config=cfg,
+                on_turn=on_turn_update,
+                session_allowed=session_allowed,
+                on_confirm_domain=on_confirm_domain,
+                on_confirm_action=on_confirm_action,
+            )
+            run_dir_str = str(result.run_dir) if result.run_dir else ""
+            if result.status == "completed":
+                run_status = "abandoned"
+                run_notes = f"[dry-run] Inspection complete ({len(result.fields_found)} fields)"
+            elif result.status == "blocked":
+                run_status = "abandoned"
+                run_notes = f"[dry-run] Blocked: {result.summary}"
+            else:
+                run_status = "error"
+                run_notes = f"[dry-run] {result.summary}"
             console.print(f"\n[bold green]Inspection Complete! ({result.status})[/bold green]")
         else:
             result = run_form_filling_agent(
@@ -266,7 +365,20 @@ def run(
                 resume_path=resume,
                 on_turn=on_turn_update,
                 on_ask_user=on_ask_user,
+                session_allowed=session_allowed,
+                on_confirm_domain=on_confirm_domain,
+                on_confirm_action=on_confirm_action,
             )
+            run_dir_str = str(result.run_dir) if result.run_dir else ""
+            if result.status == "completed":
+                run_status = "filled"
+                run_notes = result.summary or "Form filled successfully."
+            elif result.status == "blocked":
+                run_status = "abandoned"
+                run_notes = f"Blocked: {result.summary}"
+            else:
+                run_status = "error"
+                run_notes = result.summary or f"Agent status: {result.status}"
             console.print(f"\n[bold green]Form Filling Complete! ({result.status})[/bold green]")
 
         console.print(f"Turns: [bold]{result.turns}[/bold] | Duration: [bold]{result.duration_seconds}s[/bold]")
@@ -295,34 +407,176 @@ def run(
         if result.summary:
             console.print(Panel(result.summary, title="[bold]Summary[/bold]", expand=False))
 
-        if not dry_run and not headless:
-            console.print("\n[bold yellow]Safety Gate: Odos never clicks Submit automatically.[/bold yellow]")
-            console.print("[bold green]Please review the filled application in the browser window and submit manually.[/bold green]")
-            console.input("[dim]Press Enter to close the browser session and exit... [/dim]")
+        if result.status == "blocked":
+            console.print(f"\n[bold yellow]Safety Gate Halt:[/bold yellow] {result.summary}")
+            console.print("[bold cyan]The browser remains open so you can inspect or resolve the blocker manually.[/bold cyan]")
+            if not headless:
+                console.input("[dim]Press Enter when finished to close the browser session... [/dim]")
 
+        elif not dry_run and not headless:
+            console.print("\n[bold yellow]Safety Gate: Final Review Step[/bold yellow]")
+            console.print("Every field filled has been summarized above. Odos will NEVER submit without your explicit confirmation.")
+            console.print("Please choose how to proceed:")
+            console.print("  [bold cyan]1[/bold cyan]: Keep browser open to review and submit manually (Recommended)")
+            console.print("  [bold cyan]2[/bold cyan]: Approve Odos to click Submit for you")
+            console.print("  [bold cyan]3[/bold cyan]: Discard / Exit without submitting")
+            choice = console.input("\n[bold]Select an option [1/2/3] (default 1): [/bold]").strip() or "1"
+            if choice == "2":
+                console.print("Locating submit button...")
+                try:
+                    submit_loc = page.locator("button[type='submit'], input[type='submit'], button:has-text('Submit'), button:has-text('Apply')")
+                    if submit_loc.count() > 0:
+                        submit_loc.first.click()
+                        run_status = "submitted"
+                        run_notes = "Form submitted with user confirmation."
+                        console.print("[bold green]Submit button clicked with your explicit approval.[/bold green]")
+                    else:
+                        run_status = "filled"
+                        run_notes = "Form filled; could not automatically click submit button."
+                        console.print("[yellow]Could not automatically locate a submit button. Please submit manually in the browser.[/yellow]")
+                except Exception as err:
+                    run_status = "filled"
+                    run_notes = f"Form filled; submit click error: {err}"
+                    console.print(f"[yellow]Could not click submit button: {err}[/yellow]")
+                console.input("[dim]Press Enter to close the browser session and exit... [/dim]")
+            elif choice == "3":
+                run_status = "abandoned"
+                run_notes = "Discarded by user during review."
+                console.print("[yellow]Exiting without submitting.[/yellow]")
+            else:
+                run_status = "filled"
+                run_notes = "Form filled; kept open for manual review and submission."
+                console.print("[bold green]Browser is active. Review the form and submit manually whenever you are ready.[/bold green]")
+                console.input("[dim]Press Enter when finished to close the browser session and exit... [/dim]")
+
+    except DomainNotAllowedError as e:
+        run_status = "abandoned"
+        run_notes = f"Domain disallowed: {e}"
+        console.print(f"\n[bold red]Safety Gate Abort:[/bold red] {e}")
+        raise typer.Exit(code=1)
     except AgentError as e:
+        run_status = "error"
+        run_notes = f"Agent error: {e}"
         console.print(f"\n[bold red]Agent error:[/bold red] {e}")
         raise typer.Exit(code=1)
     except Exception as e:
+        run_status = "error"
+        run_notes = f"Unexpected error: {e}"
         console.print(f"\n[bold red]Unexpected error:[/bold red] {e}")
         raise typer.Exit(code=1)
     finally:
         session.close()
+        # Record or update application row in tracker
+        try:
+            tracker = ApplicationTracker(cfg.paths.tracker_db)
+            app_id = tracker.record_run(
+                url=job_url,
+                status=run_status,
+                company=run_company,
+                role=run_role,
+                notes=run_notes,
+                run_folder_path=run_dir_str,
+            )
+            console.print(f"[bold cyan]Tracker:[/bold cyan] Application #{app_id} recorded with status '[bold]{run_status}[/bold]'.")
+        except Exception as tr_err:
+            console.print(f"[yellow]Warning: Could not update tracker: {tr_err}[/yellow]")
 
 
 @app.command("list")
-def list_applications() -> None:
+def list_applications(
+    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by status (filled, submitted, abandoned, error)"),
+    limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Limit number of applications displayed"),
+    config_path: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to config.yaml"),
+) -> None:
     """List tracked job applications and statuses."""
-    console.print("[yellow]list will be implemented in M6.[/yellow]")
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as e:
+        console.print(f"[bold red]Configuration error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    tracker = ApplicationTracker(cfg.paths.tracker_db)
+    if status:
+        status_clean = status.strip().lower()
+        if status_clean not in VALID_STATUSES:
+            console.print(
+                f"[bold red]Invalid status filter '{status}'. Must be one of: {', '.join(VALID_STATUSES)}[/bold red]"
+            )
+            raise typer.Exit(code=1)
+    else:
+        status_clean = None
+
+    records = tracker.list_applications(status=status_clean, limit=limit)
+    if not records:
+        if status_clean:
+            console.print(f"[yellow]No tracked applications found with status '{status_clean}'.[/yellow]")
+        else:
+            console.print("[yellow]No tracked job applications found.[/yellow]")
+        return
+
+    table_title = f"Tracked Job Applications ({status_clean.upper()})" if status_clean else "Tracked Job Applications"
+    table = Table(title=table_title, show_lines=True)
+    table.add_column("ID", style="bold cyan", justify="right")
+    table.add_column("Date", style="dim")
+    table.add_column("Company", style="bold")
+    table.add_column("Role", style="magenta")
+    table.add_column("Status", justify="center")
+    table.add_column("URL", style="blue")
+    table.add_column("Notes", style="italic")
+
+    status_styles = {
+        "submitted": "[bold green]submitted[/bold green]",
+        "filled": "[bold cyan]filled[/bold cyan]",
+        "abandoned": "[bold yellow]abandoned[/bold yellow]",
+        "error": "[bold red]error[/bold red]",
+    }
+
+    for r in records:
+        status_text = status_styles.get(r.status, r.status)
+        url_display = r.url if len(r.url) <= 50 else r.url[:47] + "..."
+        notes_display = r.notes if len(r.notes) <= 60 else r.notes[:57] + "..."
+        table.add_row(
+            str(r.id),
+            r.date,
+            r.company or "-",
+            r.role or "-",
+            status_text,
+            url_display,
+            notes_display or "-",
+        )
+
+    console.print(table)
 
 
 @app.command("mark")
 def mark(
     application_id: int = typer.Argument(..., help="Application ID to update"),
     status: str = typer.Argument(..., help="New status (filled, submitted, abandoned, error)"),
+    notes: Optional[str] = typer.Option(None, "--notes", "-n", help="Optional notes to update"),
+    config_path: Path = typer.Option(Path("config.yaml"), "--config", "-c", help="Path to config.yaml"),
 ) -> None:
     """Update status of a tracked job application."""
-    console.print(f"[yellow]mark application #{application_id} -> {status} will be implemented in M6.[/yellow]")
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as e:
+        console.print(f"[bold red]Configuration error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    tracker = ApplicationTracker(cfg.paths.tracker_db)
+    status_clean = status.strip().lower()
+    if status_clean not in VALID_STATUSES:
+        console.print(
+            f"[bold red]Invalid status '{status}'. Must be one of: {', '.join(VALID_STATUSES)}[/bold red]"
+        )
+        raise typer.Exit(code=1)
+
+    app_record = tracker.get_application(application_id)
+    if not app_record:
+        console.print(f"[bold red]Application #{application_id} not found in tracker.[/bold red]")
+        raise typer.Exit(code=1)
+
+    tracker.update_status(application_id, status_clean, notes=notes)
+    console.print(f"[bold green]Application #{application_id} status updated to '[bold]{status_clean}[/bold]'.[/bold green]")
 
 
 if __name__ == "__main__":
