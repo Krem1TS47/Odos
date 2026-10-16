@@ -76,6 +76,12 @@ def extract_job_details(
                 detected_role,
                 flags=re.IGNORECASE,
             ).strip()
+            detected_role = re.sub(
+                r"\s+(?:job\s+application|application)$",
+                "",
+                detected_role,
+                flags=re.IGNORECASE,
+            ).strip()
             if not role and detected_role:
                 role = detected_role
             if not company and detected_company:

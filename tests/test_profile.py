@@ -91,3 +91,20 @@ def test_load_profile_invalid_schema(tmp_path):
     bad_schema.write_text("education: not_a_list\n", encoding="utf-8")
     with pytest.raises(ProfileError, match="Invalid profile"):
         load_profile(bad_schema)
+
+
+def test_format_profile_context():
+    from jobassist.profile import format_profile_context
+    profile = load_profile("data/profile.yaml")
+    answers = load_answers("data/answers.yaml")
+    ctx = format_profile_context(profile, answers)
+    assert "CANDIDATE PROFILE DATA" in ctx
+    assert "Benjamin" in ctx
+    assert "Ching" in ctx
+    assert "benbenching@gmail.com" in ctx
+    assert "Work Authorization:" in ctx
+    assert "Demographics & Equal Employment Opportunity (EEOC):" in ctx
+    assert "Education:" in ctx
+    assert "Work Experience:" in ctx
+    assert "Reusable Answers & Templates:" in ctx
+

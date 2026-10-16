@@ -100,7 +100,7 @@ jobassist check-config
 ```
 
 #### Launch the Job Application Assistant
-Start the assistant to fill out a job application at a target URL:
+Start the assistant to fill out a job application at a target URL or local HTML file:
 ```bash
 jobassist run <job_url>
 ```
@@ -108,6 +108,10 @@ jobassist run <job_url>
 Options:
 - `--dry-run`: Read-only mode to inspect the form without filling in fields.
 - `--resume <path>` / `-r <path>`: Override the default resume file for this run.
+- `--company <name>`: Specify or override company name for the tracker.
+- `--role <title>`: Specify or override job role/title for the tracker.
+- `--headless`: Run browser in headless mode (useful for automated testing/scripts).
+- `--config <path>` / `-c <path>`: Path to custom `config.yaml`.
 
 ```bash
 # Example: Dry-run inspection
@@ -115,6 +119,9 @@ jobassist run https://example.com/jobs/123 --dry-run
 
 # Example: Run with a specific resume
 jobassist run https://example.com/jobs/123 --resume data/resumes/resume.pdf
+
+# Example: Run against the local static test form
+jobassist run data/test_form.html
 ```
 
 #### Additional Session Commands
@@ -122,18 +129,54 @@ jobassist run https://example.com/jobs/123 --resume data/resumes/resume.pdf
   ```bash
   jobassist login
   ```
+  Options: `--url <url>` / `-u <url>` to navigate directly to a login portal.
+
 - **List Tracked Applications:** View logged applications and their statuses:
   ```bash
   jobassist list
   ```
+  Options:
+  - `--status <status>` / `-s <status>`: Filter by status (`filled`, `submitted`, `abandoned`, `error`).
+  - `--limit <n>` / `-n <n>`: Limit number of displayed applications.
+
 - **Update Application Status:** Update the status of an application (e.g., `filled`, `submitted`, `abandoned`, `error`):
   ```bash
-  jobassist mark <id> <status>
+  jobassist mark <id> <status> [--notes <notes>]
   ```
+
 - **Help Menu:**
   ```bash
   jobassist --help
   ```
+
+---
+
+## Testing & Local Simulation
+
+### 1. Local Test Form
+Odos provides a realistic static job application form in `data/test_form.html` to exercise the assistant end-to-end without interacting with live job boards:
+```bash
+# Dry-run inspection on test form
+jobassist run data/test_form.html --dry-run
+
+# Form filling on test form
+jobassist run data/test_form.html
+```
+
+### 2. Automated Test Suite
+Run the test suite using `pytest`:
+```bash
+pytest
+```
+The test suite covers:
+- Configuration and schema validation (`tests/test_config.py`)
+- Candidate profile and answers loading and context formatting (`tests/test_profile.py`)
+- Browser session and Playwright management (`tests/test_browser.py`)
+- Action execution: typing, selecting, clicking, uploading, scrolling (`tests/test_actions.py`)
+- Safety gates, domain allowlists, blocker detection, and confirmation prompts (`tests/test_safety.py`)
+- SQLite application tracker and job detail extraction (`tests/test_tracker.py`)
+- CLI command tests for check-config, login, run, list, and mark (`tests/test_cli.py`)
+- End-to-end form inspection and filling on `test_form.html` (`tests/test_e2e_form.py`)
 
 ---
 
@@ -146,4 +189,4 @@ jobassist run https://example.com/jobs/123 --resume data/resumes/resume.pdf
 - [x] **M4: Form Filling** - Fill actions (click, type, select, upload) using stored profile
 - [x] **M5: Safety Gates** - Domain allowlists, confirmation prompts, review before submit
 - [x] **M6: Tracker** - SQLite local job application tracker
-- [ ] **M7: Tests & Polish** - Unit tests, local test form, end-to-end polish
+- [x] **M7: Tests & Polish** - Unit tests, local test form, end-to-end polish
