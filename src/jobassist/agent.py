@@ -311,6 +311,7 @@ def run_dry_run_agent(
     fields_found: List[str] = []
     summary_text = ""
     status = "running"
+    ignored_blockers: Set[str] = set()
 
     while turn <= max_turns:
         elapsed = time.time() - start_time
@@ -321,15 +322,19 @@ def run_dry_run_agent(
             break
 
         # Check for CAPTCHA, bot challenges, or login walls
-        blocker = detect_page_blockers(page)
+        blocker = detect_page_blockers(page, ignored_blockers=ignored_blockers)
         if blocker:
             log_turn(actual_run_dir, turn, "page_blocker", {"blocker": blocker})
             if on_turn:
                 on_turn(turn, f"[WARN] Safety Gate Alert: {blocker}")
             if on_blocker:
-                resolved = on_blocker(blocker)
+                try:
+                    resolved = on_blocker(blocker, ignored_blockers)
+                except TypeError:
+                    resolved = on_blocker(blocker)
                 if resolved:
-                    still_blocked = detect_page_blockers(page)
+                    ignored_blockers.add(blocker)
+                    still_blocked = detect_page_blockers(page, ignored_blockers=ignored_blockers)
                     if not still_blocked:
                         log_turn(actual_run_dir, turn, "blocker_resolved", {"blocker": blocker})
                         if on_turn:
@@ -430,9 +435,13 @@ def run_dry_run_agent(
                 if on_turn:
                     on_turn(turn, f"[WARN] Agent visually reported blocker: {blocker_msg}")
                 if on_blocker:
-                    resolved = on_blocker(blocker_msg)
+                    try:
+                        resolved = on_blocker(blocker_msg, ignored_blockers)
+                    except TypeError:
+                        resolved = on_blocker(blocker_msg)
                     if resolved:
-                        still_blocked = detect_page_blockers(page)
+                        ignored_blockers.add(blocker_msg)
+                        still_blocked = detect_page_blockers(page, ignored_blockers=ignored_blockers)
                         if not still_blocked:
                             log_turn(actual_run_dir, turn, "blocker_resolved", {"reported": blocker_msg})
                             if on_turn:
@@ -556,6 +565,7 @@ def run_form_filling_agent(
     fields_filled: List[Dict[str, Any]] = []
     summary_text = ""
     status = "running"
+    ignored_blockers: Set[str] = set()
 
     while turn <= max_turns:
         elapsed = time.time() - start_time
@@ -566,15 +576,19 @@ def run_form_filling_agent(
             break
 
         # Check for CAPTCHA, bot challenges, or login walls
-        blocker = detect_page_blockers(page)
+        blocker = detect_page_blockers(page, ignored_blockers=ignored_blockers)
         if blocker:
             log_turn(actual_run_dir, turn, "page_blocker", {"blocker": blocker})
             if on_turn:
                 on_turn(turn, f"[WARN] Safety Gate Alert: {blocker}")
             if on_blocker:
-                resolved = on_blocker(blocker)
+                try:
+                    resolved = on_blocker(blocker, ignored_blockers)
+                except TypeError:
+                    resolved = on_blocker(blocker)
                 if resolved:
-                    still_blocked = detect_page_blockers(page)
+                    ignored_blockers.add(blocker)
+                    still_blocked = detect_page_blockers(page, ignored_blockers=ignored_blockers)
                     if not still_blocked:
                         log_turn(actual_run_dir, turn, "blocker_resolved", {"blocker": blocker})
                         if on_turn:
@@ -725,9 +739,13 @@ def run_form_filling_agent(
                 if on_turn:
                     on_turn(turn, f"[WARN] Agent visually reported blocker: {blocker_msg}")
                 if on_blocker:
-                    resolved = on_blocker(blocker_msg)
+                    try:
+                        resolved = on_blocker(blocker_msg, ignored_blockers)
+                    except TypeError:
+                        resolved = on_blocker(blocker_msg)
                     if resolved:
-                        still_blocked = detect_page_blockers(page)
+                        ignored_blockers.add(blocker_msg)
+                        still_blocked = detect_page_blockers(page, ignored_blockers=ignored_blockers)
                         if not still_blocked:
                             log_turn(actual_run_dir, turn, "blocker_resolved", {"reported": blocker_msg})
                             if on_turn:

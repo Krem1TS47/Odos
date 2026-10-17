@@ -185,7 +185,7 @@ def test_dry_run_agent_blocker_pause_and_resume(tmp_path):
         page = session.get_page()
 
         blocker_states = ["CAPTCHA: Turnstile challenge", None, None, None]
-        def fake_detect(p):
+        def fake_detect(p, *args, **kwargs):
             if blocker_states:
                 return blocker_states.pop(0)
             return None
@@ -314,7 +314,7 @@ def test_form_filling_agent_blocker_pause_and_resume(tmp_path):
         page = session.get_page()
 
         blocker_states = ["CAPTCHA: Arkose Labs puzzle", None, None, None]
-        def fake_detect(p):
+        def fake_detect(p, *args, **kwargs):
             if blocker_states:
                 return blocker_states.pop(0)
             return None
@@ -348,4 +348,65 @@ def test_form_filling_agent_blocker_pause_and_resume(tmp_path):
 
             assert on_blocker_mock.called
             assert result.status == "completed"
+
+
+def test_agent_ignored_blockers_persists_across_turns(tmp_path):
+    html_file = tmp_path / "page.html"
+    html_file.write_text("<html><body><input name='field1'/><input name='field2'/></body></html>", encoding="utf-8")
+    page_url = html_file.as_uri()
+
+    config = AppConfig(
+        limits=LimitsConfig(max_turns=5, max_runtime_seconds=60),
+        paths=PathsConfig(runs_dir=tmp_path / "runs"),
+    )
+
+    with BrowserSession(headless=True, user_data_dir=tmp_path / "profile") as session:
+        page = session.get_page()
+
+        # Simulate blocker that is detected on turn 1, resolved/ignored by user, and stays in DOM on turn 2
+        blocker_msg = "CAPTCHA element detected (.g-recaptcha)."
+        def fake_detect(p, ignored_blockers=None):
+            if ignored_blockers and (blocker_msg in ignored_blockers or ".g-recaptcha" in ignored_blockers):
+                return None
+            return blocker_msg
+
+        on_blocker_mock = MagicMock(return_value=True)
+
+        with patch("jobassist.agent.genai.Client") as mock_client_cls, \
+             patch("jobassist.agent.detect_page_blockers", side_effect=fake_detect):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            mock_chat = MagicMock()
+            mock_client.chats.create.return_value = mock_chat
+
+            # Turn 1: scroll
+            fc_scroll = MagicMock()
+            fc_scroll.name = "scroll"
+            fc_scroll.args = {"direction": "down", "amount": 100}
+            resp1 = MagicMock()
+            resp1.function_calls = [fc_scroll]
+
+            # Turn 2: finish
+            fc_finish = MagicMock()
+            fc_finish.name = "finish_inspection"
+            fc_finish.args = {"fields_found": ["field1", "field2"], "summary": "done"}
+            resp2 = MagicMock()
+            resp2.function_calls = [fc_finish]
+
+            mock_chat.send_message.side_effect = [resp1, MagicMock(), resp2]
+
+            result = run_dry_run_agent(
+                page=page,
+                job_url=page_url,
+                config=config,
+                run_dir=tmp_path / "run_ignored_persist",
+                on_blocker=on_blocker_mock,
+            )
+
+            # on_blocker was called on turn 1
+            assert on_blocker_mock.call_count == 1
+            # Turn 2 did not call on_blocker again because it was ignored!
+            assert result.status == "completed"
+            assert result.turns == 2
+
 

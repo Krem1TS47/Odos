@@ -12,6 +12,8 @@ from jobassist.safety import (
     ensure_domain_allowed,
     extract_domain,
     is_action_blocked,
+    is_blocker_ignored,
+    is_captcha_solved,
     is_confirm_required,
     is_domain_allowed,
 )
@@ -189,6 +191,53 @@ def test_detect_page_blockers():
     clean_page.locator.return_value = clean_body
     clean_page.frames = []
     assert detect_page_blockers(clean_page) is None
+
+
+def test_is_captcha_solved():
+    # Empty token returns False
+    page_empty = MagicMock()
+    loc_empty = MagicMock()
+    loc_empty.count.return_value = 1
+    loc_empty.first.input_value.return_value = "   "
+    page_empty.locator.return_value = loc_empty
+    page_empty.frames = []
+    assert is_captcha_solved(page_empty) is False
+
+    # Populated token returns True
+    page_solved = MagicMock()
+    loc_solved = MagicMock()
+    loc_solved.count.return_value = 1
+    loc_solved.first.input_value.return_value = "03AFcWeA_test_recaptcha_response_token"
+    page_solved.locator.return_value = loc_solved
+    page_solved.frames = []
+    assert is_captcha_solved(page_solved) is True
+
+
+def test_detect_page_blockers_solved_and_ignored():
+    # 1. Page with CAPTCHA selector but populated token is NOT blocked
+    page_solved = MagicMock()
+    page_solved.title.return_value = "Apply for Job"
+    def loc_fn(selector):
+        loc = MagicMock()
+        if "recaptcha" in selector:
+            loc.count.return_value = 1
+            loc.first.input_value.return_value = "solved_token_xyz"
+        else:
+            loc.count.return_value = 0
+            loc.inner_text.return_value = ""
+        return loc
+    page_solved.locator.side_effect = loc_fn
+    page_solved.frames = []
+    assert detect_page_blockers(page_solved) is None
+
+    # 2. Ignored blocker by signature
+    cf_page = MagicMock()
+    cf_page.title.return_value = "Just a moment... Attention Required! | Cloudflare"
+    # Without ignored_blockers: flags blocker
+    assert detect_page_blockers(cf_page) is not None
+    # With ignored_blockers: ignored!
+    assert detect_page_blockers(cf_page, ignored_blockers={"Cloudflare"}) is None
+    assert detect_page_blockers(cf_page, ignored_blockers={"Cloudflare bot challenge screen detected."}) is None
 
 
 def test_check_action_safety():

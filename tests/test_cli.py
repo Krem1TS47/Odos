@@ -127,6 +127,33 @@ def test_run_command_blocked_halt(tmp_path):
         mock_instance.close.assert_called_once()
 
 
+def test_run_command_blocker_callback_force_resume(tmp_path):
+    with patch("jobassist.cli.BrowserSession") as mock_session_cls, \
+         patch("jobassist.cli.run_form_filling_agent") as mock_run_agent:
+        mock_instance = MagicMock()
+        mock_session_cls.return_value = mock_instance
+        mock_instance.start.return_value = MagicMock()
+
+        from jobassist.agent import AgentResult
+
+        def fake_agent(**kwargs):
+            on_blocker = kwargs.get("on_blocker")
+            if on_blocker:
+                ignored = set()
+                res = on_blocker("CAPTCHA: reCAPTCHA detected", ignored)
+                assert res is True
+                assert "CAPTCHA: reCAPTCHA detected" in ignored
+            return AgentResult(status="completed", turns=1, summary="Done")
+
+        mock_run_agent.side_effect = fake_agent
+
+        # input: "y\n" for domain, "2\n" for force resume option, "1\n" for review step, "\n" for press enter
+        result = runner.invoke(app, ["run", "https://example.com/jobs"], input="y\n2\n1\n\n")
+        assert result.exit_code == 0
+        assert "Ignoring blocker signature and resuming agent" in result.output
+        mock_instance.close.assert_called_once()
+
+
 def _create_test_config(tmp_path):
     cfg_path = tmp_path / "test_config.yaml"
     tracker_db = tmp_path / "tracker.db"

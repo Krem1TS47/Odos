@@ -334,7 +334,7 @@ def run(
             console.print(f"\n[bold yellow]Agent asks ({field_name}):[/bold yellow] {question}")
             return console.input("[bold cyan]Your answer: [/bold cyan]").strip()
 
-        def on_blocker_callback(blocker_msg: str) -> bool:
+        def on_blocker_callback(blocker_msg: str, ignored_blockers: Optional[set[str]] = None) -> bool:
             if headless:
                 console.print(f"\n[bold red]Safety Gate Alert: Blocker detected in headless mode:[/bold red] {blocker_msg}")
                 return False
@@ -346,27 +346,35 @@ def run(
             while True:
                 console.print("\nPlease choose an action:")
                 console.print("  [bold cyan]1[/bold cyan]: Resume agent (I have resolved the challenge in the browser)")
-                console.print("  [bold cyan]2[/bold cyan]: Keep browser open for manual review/submit (hand control to human)")
-                console.print("  [bold cyan]3[/bold cyan]: Abandon / Quit run")
-                choice = console.input("[bold]Select an option [1/2/3] (default 1): [/bold]").strip() or "1"
+                console.print("  [bold cyan]2[/bold cyan]: Force resume & ignore this blocker (I verified the page is ready to fill)")
+                console.print("  [bold cyan]3[/bold cyan]: Keep browser open for manual review/submit (hand control to human)")
+                console.print("  [bold cyan]4[/bold cyan]: Abandon / Quit run")
+                choice = console.input("[bold]Select an option [1/2/3/4] (default 1): [/bold]").strip() or "1"
 
                 if choice == "1":
-                    still_blocked = detect_page_blockers(page)
+                    still_blocked = detect_page_blockers(page, ignored_blockers=ignored_blockers)
                     if still_blocked:
                         console.print(f"[bold yellow]Blocker is still detected on the page:[/bold yellow] {still_blocked}")
-                        console.print("Please complete the challenge or verification in the browser before resuming.")
+                        console.print("[dim]Tip: If you already completed the challenge or it is an inert container, select option '2' to force resume.[/dim]")
                         continue
                     else:
                         console.print("[bold green]Verification passed: Blocker cleared! Resuming agent...[/bold green]")
+                        if ignored_blockers is not None:
+                            ignored_blockers.add(blocker_msg)
                         return True
                 elif choice == "2":
+                    console.print("[bold green]Ignoring blocker signature and resuming agent...[/bold green]")
+                    if ignored_blockers is not None:
+                        ignored_blockers.add(blocker_msg)
+                    return True
+                elif choice == "3":
                     console.print("[bold yellow]Handing control over to you. Agent execution halted.[/bold yellow]")
                     return False
-                elif choice == "3":
+                elif choice == "4":
                     console.print("[yellow]Abandoning run.[/yellow]")
                     return False
                 else:
-                    console.print("[red]Invalid choice. Please select 1, 2, or 3.[/red]")
+                    console.print("[red]Invalid choice. Please select 1, 2, 3, or 4.[/red]")
 
         if dry_run:
             result = run_dry_run_agent(

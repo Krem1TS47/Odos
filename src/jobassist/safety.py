@@ -74,6 +74,53 @@ LOGIN_WALL_PATTERNS = [
     "sign in or register",
 ]
 
+CAPTCHA_TOKEN_SELECTORS = [
+    "textarea[name='g-recaptcha-response']",
+    "input[name='cf-turnstile-response']",
+    "textarea[name='h-captcha-response']",
+    "input[name='fc-token']",
+    "input[name='aws-waf-token']",
+]
+
+
+def is_captcha_solved(page: Any) -> bool:
+    """Check if common CAPTCHA response tokens are populated with non-empty string values on the page."""
+    for sel in CAPTCHA_TOKEN_SELECTORS:
+        try:
+            loc = page.locator(sel)
+            if loc.count() > 0:
+                val = loc.first.input_value(timeout=500)
+                if isinstance(val, str) and val.strip():
+                    return True
+        except Exception:
+            pass
+
+    if hasattr(page, "frames"):
+        for frame in page.frames:
+            for sel in CAPTCHA_TOKEN_SELECTORS:
+                try:
+                    loc = frame.locator(sel)
+                    if loc.count() > 0:
+                        val = loc.first.input_value(timeout=500)
+                        if isinstance(val, str) and val.strip():
+                            return True
+                except Exception:
+                    pass
+
+    return False
+
+
+def is_blocker_ignored(blocker_msg: str, ignored_blockers: Optional[Set[str]]) -> bool:
+    """Check if a blocker message or selector matches the ignored blockers set."""
+    if not ignored_blockers:
+        return False
+    if blocker_msg in ignored_blockers:
+        return True
+    for ig in ignored_blockers:
+        if ig and (ig in blocker_msg or blocker_msg in ig):
+            return True
+    return False
+
 
 def extract_domain(url: str) -> str:
     """Extract and normalize the hostname from a URL.
@@ -194,11 +241,12 @@ def is_action_blocked(action_name: str, details: str, blocked_actions: List[str]
     return False
 
 
-def detect_page_blockers(page: Any) -> Optional[str]:
-    """Detect if page displays a CAPTCHA, bot challenge, or login wall.
+def detect_page_blockers(page: Any, ignored_blockers: Optional[Set[str]] = None) -> Optional[str]:
+    """Detect if page displays an active CAPTCHA, bot challenge, or login wall.
 
     Args:
         page: Playwright Page instance.
+        ignored_blockers: Optional set of blocker signatures/selectors to ignore (e.g. user-whitelisted).
 
     Returns:
         String description of detected blocker, or None.
@@ -206,37 +254,55 @@ def detect_page_blockers(page: Any) -> Optional[str]:
     try:
         title = (page.title() or "").lower()
         if "just a moment..." in title or "attention required! | cloudflare" in title:
-            return "Cloudflare bot challenge screen detected."
+            msg = "Cloudflare bot challenge screen detected."
+            if not is_blocker_ignored(msg, ignored_blockers):
+                return msg
 
-        for selector in CAPTCHA_SELECTORS:
-            try:
-                if page.locator(selector).count() > 0:
-                    return f"CAPTCHA element detected ({selector})."
-            except Exception:
-                pass
+        # If a CAPTCHA response token is already populated on the page, the challenge is solved
+        captcha_already_solved = is_captcha_solved(page)
 
-        # Check nested frames
-        if hasattr(page, "frames"):
-            for frame in page.frames:
-                for selector in CAPTCHA_SELECTORS:
-                    try:
-                        if frame.locator(selector).count() > 0:
-                            return f"CAPTCHA element detected in frame ({selector})."
-                    except Exception:
-                        pass
+        if not captcha_already_solved:
+            for selector in CAPTCHA_SELECTORS:
+                try:
+                    loc = page.locator(selector)
+                    if loc.count() > 0:
+                        msg = f"CAPTCHA element detected ({selector})."
+                        if not is_blocker_ignored(msg, ignored_blockers) and not is_blocker_ignored(selector, ignored_blockers):
+                            return msg
+                except Exception:
+                    pass
+
+            # Check nested frames
+            if hasattr(page, "frames"):
+                for frame in page.frames:
+                    for selector in CAPTCHA_SELECTORS:
+                        try:
+                            loc = frame.locator(selector)
+                            if loc.count() > 0:
+                                msg = f"CAPTCHA element detected in frame ({selector})."
+                                if not is_blocker_ignored(msg, ignored_blockers) and not is_blocker_ignored(selector, ignored_blockers):
+                                    return msg
+                        except Exception:
+                            pass
 
         try:
             body_text = (page.locator("body").inner_text(timeout=1000) or "").lower()
         except Exception:
             body_text = ""
 
-        for phrase in CAPTCHA_TEXT_PATTERNS:
-            if phrase in body_text:
-                return f"Human verification prompt detected ('{phrase}')."
+        # Only check text patterns if not already solved
+        if not captcha_already_solved:
+            for phrase in CAPTCHA_TEXT_PATTERNS:
+                if phrase in body_text:
+                    msg = f"Human verification prompt detected ('{phrase}')."
+                    if not is_blocker_ignored(msg, ignored_blockers) and not is_blocker_ignored(phrase, ignored_blockers):
+                        return msg
 
         for phrase in LOGIN_WALL_PATTERNS:
             if phrase in body_text or phrase in title:
-                return f"Login wall detected ('{phrase}'). Please log in first."
+                msg = f"Login wall detected ('{phrase}'). Please log in first."
+                if not is_blocker_ignored(msg, ignored_blockers) and not is_blocker_ignored(phrase, ignored_blockers):
+                    return msg
 
     except Exception:
         pass

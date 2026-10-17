@@ -48,6 +48,7 @@ class BrowserSession:
             launch_args = {
                 "user_data_dir": str(self.user_data_dir),
                 "headless": self.headless,
+                "args": ["--disable-blink-features=AutomationControlled"],
                 "viewport": {
                     "width": self.config.viewport.width,
                     "height": self.config.viewport.height,
