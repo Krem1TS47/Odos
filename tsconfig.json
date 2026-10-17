@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["extension/src/core/*"],
+      "@content/*": ["extension/src/content/*"],
+      "@background/*": ["extension/src/background/*"],
+      "@dashboard/*": ["extension/src/dashboard/*"],
+      "@popup/*": ["extension/src/popup/*"],
+      "@llm/*": ["extension/src/llm/*"]
+    }
+  },
+  "include": ["extension/src", "tests", "scripts"]
+}

@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Software Engineer Application at Acme Labs</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --border: #cbd5e1;
+      --focus-ring: rgba(37, 99, 235, 0.2);
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 40px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+      border: 1px solid var(--border);
+    }
+    header {
+      margin-bottom: 32px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .job-meta {
+      font-size: 15px;
+      color: var(--text-muted);
+    }
+    section {
+      margin-bottom: 32px;
+    }
+    h2 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #1e293b;
+      border-left: 4px solid var(--primary);
+      padding-left: 10px;
+    }
+    .form-group {
+      margin-bottom: 18px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+    }
+    label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: #334155;
+    }
+    label .required {
+      color: #ef4444;
+    }
+    input[type="text"],
+    input[type="email"],
+    input[type="tel"],
+    input[type="url"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 15px;
+      color: var(--text);
+      background: #ffffff;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--focus-ring);
+    }
+    textarea {
+      resize: vertical;
+      min-height: 90px;
+    }
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      cursor: pointer;
+    }
+    .checkbox-group input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+    .checkbox-group label {
+      margin-bottom: 0;
+      font-weight: 400;
+      cursor: pointer;
+    }
+    .file-upload-box {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      text-align: center;
+      background: #f1f5f9;
+      transition: border-color 0.2s ease;
+    }
+    .file-upload-box:hover {
+      border-color: var(--primary);
+    }
+    .file-upload-box input[type="file"] {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    .submit-container {
+      margin-top: 36px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .disclaimer {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .submit-btn {
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      border-radius: 8px;
+      padding: 14px 28px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+      align-self: flex-start;
+    }
+    .submit-btn:hover {
+      background: var(--primary-hover);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Software Engineer - Acme Labs</h1>
+      <div class="job-meta">San Francisco, CA / Remote &bull; Full-time &bull; Engineering</div>
+    </header>
+
+    <form id="application_form" action="#" method="POST" onsubmit="event.preventDefault(); alert('Application submitted successfully!');">
+      <!-- 1. Personal Information -->
+      <section>
+        <h2>1. Personal Information</h2>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="first_name">First Name <span class="required">*</span></label>
+            <input type="text" id="first_name" name="first_name" placeholder="First name" required />
+          </div>
+          <div class="form-group">
+            <label for="last_name">Last Name <span class="required">*</span></label>
+            <input type="text" id="last_name" name="last_name" placeholder="Last name" required />
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="email">Email Address <span class="required">*</span></label>
+            <input type="email" id="email" name="email" placeholder="you@example.com" required />
+          </div>
+          <div class="form-group">
+            <label for="phone">Phone Number <span class="required">*</span></label>
+            <input type="tel" id="phone" name="phone" placeholder="e.g. +1 555-123-4567" required />
+          </div>
+        </div>
+
+        <div class="grid-3">
+          <div class="form-group">
+            <label for="city">City</label>
+            <input type="text" id="city" name="city" placeholder="City" />
+          </div>
+          <div class="form-group">
+            <label for="region">State / Province</label>
+            <input type="text" id="region" name="region" placeholder="State/Region" />
+          </div>
+          <div class="form-group">
+            <label for="country">Country</label>
+            <input type="text" id="country" name="country" placeholder="Country" />
+          </div>
+        </div>
+
+        <div class="grid-3">
+          <div class="form-group">
+            <label for="linkedin">LinkedIn Profile</label>
+            <input type="url" id="linkedin" name="linkedin" placeholder="https://linkedin.com/in/..." />
+          </div>
+          <div class="form-group">
+            <label for="github">GitHub Profile</label>
+            <input type="url" id="github" name="github" placeholder="https://github.com/..." />
+          </div>
+          <div class="form-group">
+            <label for="portfolio">Portfolio / Website</label>
+            <input type="url" id="portfolio" name="portfolio" placeholder="https://..." />
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Work Authorization & Preferences -->
+      <section>
+        <h2>2. Work Authorization & Preferences</h2>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="work_auth">Are you legally authorized to work in this country? <span class="required">*</span></label>
+            <select id="work_auth" name="work_auth" required>
+              <option value="">Select an option...</option>
+              <option value="Yes">Yes</option>
+              <option value="No">No</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="sponsorship">Will you now or in the future require visa sponsorship? <span class="required">*</span></label>
+            <select id="sponsorship" name="sponsorship" required>
+              <option value="">Select an option...</option>
+              <option value="No">No</option>
+              <option value="Yes">Yes</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="desired_salary">Desired Annual Salary ($ USD)</label>
+            <input type="text" id="desired_salary" name="desired_salary" placeholder="e.g. 150,000" />
+          </div>
+          <div class="form-group">
+            <label for="notice_period">Notice Period / Earliest Start Date</label>
+            <input type="text" id="notice_period" name="notice_period" placeholder="e.g. 2 weeks" />
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="remote_pref">Work Location Preference</label>
+            <select id="remote_pref" name="remote_pref">
+              <option value="">Select preference...</option>
+              <option value="Remote">Remote</option>
+              <option value="Hybrid">Hybrid</option>
+              <option value="In-office">In-office</option>
+            </select>
+          </div>
+          <div class="form-group" style="padding-top: 28px;">
+            <div class="checkbox-group">
+              <input type="checkbox" id="relocate" name="relocate" value="yes" />
+              <label for="relocate">Are you willing to relocate for this position?</label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Legal Disclosures & EEOC -->
+      <section>
+        <h2>3. Disclosures & Demographics</h2>
+        <div class="checkbox-group">
+          <input type="checkbox" id="age_18" name="age_18" value="true" required />
+          <label for="age_18">I certify that I am at least 18 years of age. <span class="required">*</span></label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="gov_official" name="gov_official" value="true" />
+          <label for="gov_official">Are you or an immediate family member a current government official?</label>
+        </div>
+
+        <div class="grid-2" style="margin-top: 14px;">
+          <div class="form-group">
+            <label for="gender">Gender</label>
+            <select id="gender" name="gender">
+              <option value="">Select...</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Non-binary">Non-binary</option>
+              <option value="Decline to self-identify">Decline to self-identify</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="race">Race / Ethnicity</label>
+            <select id="race" name="race">
+              <option value="">Select...</option>
+              <option value="Asian">Asian</option>
+              <option value="White">White</option>
+              <option value="Black or African American">Black or African American</option>
+              <option value="Hispanic or Latino">Hispanic or Latino</option>
+              <option value="Two or More Races">Two or More Races</option>
+              <option value="Decline to self-identify">Decline to self-identify</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="veteran_status">Veteran Status</label>
+            <select id="veteran_status" name="veteran_status">
+              <option value="">Select...</option>
+              <option value="I am not a protected veteran">I am not a protected veteran</option>
+              <option value="I identify as one or more classifications of protected veteran">I identify as a protected veteran</option>
+              <option value="I decline to self-identify">I decline to self-identify</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="disability_status">Disability Status</label>
+            <select id="disability_status" name="disability_status">
+              <option value="">Select...</option>
+              <option value="No, I do not have a disability">No, I do not have a disability</option>
+              <option value="Yes, I have a disability">Yes, I have a disability</option>
+              <option value="I decline to self-identify">I decline to self-identify</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Education & Experience -->
+      <section>
+        <h2>4. Education & Experience</h2>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="school">School / University</label>
+            <input type="text" id="school" name="school" placeholder="e.g. Stanford University" />
+          </div>
+          <div class="form-group">
+            <label for="degree">Degree & Field</label>
+            <input type="text" id="degree" name="degree" placeholder="e.g. B.S. in Computer Science" />
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="company">Most Recent Company</label>
+            <input type="text" id="company" name="company" placeholder="e.g. TechCorp" />
+          </div>
+          <div class="form-group">
+            <label for="title">Most Recent Title</label>
+            <input type="text" id="title" name="title" placeholder="e.g. Software Engineer" />
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. Additional Questions -->
+      <section>
+        <h2>5. Additional Questions</h2>
+        <div class="form-group">
+          <label for="how_did_you_hear">How did you hear about this opportunity?</label>
+          <input type="text" id="how_did_you_hear" name="how_did_you_hear" placeholder="e.g. Company website, LinkedIn, Referral" />
+        </div>
+        <div class="form-group">
+          <label for="why_interested">Why are you interested in joining Acme Labs?</label>
+          <textarea id="why_interested" name="why_interested" placeholder="Tell us why you want to work here..."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="biggest_achievement">Describe your biggest professional achievement.</label>
+          <textarea id="biggest_achievement" name="biggest_achievement" placeholder="Highlight a project or accomplishment..."></textarea>
+        </div>
+      </section>
+
+      <!-- 6. Resume Upload -->
+      <section>
+        <h2>6. Resume Upload</h2>
+        <div class="file-upload-box">
+          <label for="resume">Attach your resume (PDF or DOCX) <span class="required">*</span></label>
+          <div style="margin-top: 10px;">
+            <input type="file" id="resume" name="resume" accept=".pdf,.doc,.docx" required />
+          </div>
+        </div>
+      </section>
+
+      <!-- 7. Submit -->
+      <div class="submit-container">
+        <p class="disclaimer">By clicking submit, you confirm that the information provided is true and complete to the best of your knowledge.</p>
+        <button type="submit" id="submit_btn" class="submit-btn">Submit Application</button>
+      </div>
+    </form>
+  </div>
+</body>
+</html>

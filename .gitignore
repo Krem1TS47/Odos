@@ -3,6 +3,7 @@
 
 # User data
 data/
+legacy/data/
 
 # Python cache & virtual environment
 __pycache__/
@@ -11,4 +12,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+extension/dist/
 .pytest_cache/
+
+# Node / JS
+node_modules/
