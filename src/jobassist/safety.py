@@ -30,18 +30,38 @@ CAPTCHA_SELECTORS = [
     "iframe[src*='hcaptcha']",
     "iframe[src*='turnstile']",
     "iframe[src*='challenges.cloudflare.com']",
+    "iframe[src*='arkoselabs']",
+    "iframe[src*='funcaptcha']",
+    "iframe[src*='awswaf']",
+    "iframe[src*='datadome']",
+    "iframe[src*='perimeterx']",
+    "iframe[src*='kasada']",
     ".g-recaptcha",
     ".h-captcha",
     "#cf-challenge-running",
     "#challenge-stage",
+    "#challenge-form",
+    "#fc-iframe-wrap",
+    "#aws-waf-captcha",
+    "div#datadome",
+    "#px-captcha",
+    ".geetest_holder",
+    ".geetest_radar",
 ]
 
 CAPTCHA_TEXT_PATTERNS = [
     "verify you are human",
+    "verify that you are a human",
     "please verify you are a human",
     "just a moment...",
     "security check to continue",
     "complete the captcha",
+    "press & hold",
+    "press and hold",
+    "bot detection",
+    "unusual traffic",
+    "solve the puzzle",
+    "solve this puzzle",
 ]
 
 LOGIN_WALL_PATTERNS = [
@@ -50,6 +70,8 @@ LOGIN_WALL_PATTERNS = [
     "please sign in to apply",
     "sign in to apply",
     "sign in to your account",
+    "create an account to apply",
+    "sign in or register",
 ]
 
 
@@ -192,6 +214,16 @@ def detect_page_blockers(page: Any) -> Optional[str]:
                     return f"CAPTCHA element detected ({selector})."
             except Exception:
                 pass
+
+        # Check nested frames
+        if hasattr(page, "frames"):
+            for frame in page.frames:
+                for selector in CAPTCHA_SELECTORS:
+                    try:
+                        if frame.locator(selector).count() > 0:
+                            return f"CAPTCHA element detected in frame ({selector})."
+                    except Exception:
+                        pass
 
         try:
             body_text = (page.locator("body").inner_text(timeout=1000) or "").lower()

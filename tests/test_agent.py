@@ -169,3 +169,183 @@ def test_form_filling_agent_flow(tmp_path):
             assert page.locator("#resume_upload").evaluate("el => el.files.length") == 1
             assert (tmp_path / "run_fill" / "turn_001.png").is_file()
             assert (tmp_path / "run_fill" / "summary.json").is_file()
+
+
+def test_dry_run_agent_blocker_pause_and_resume(tmp_path):
+    html_file = tmp_path / "page.html"
+    html_file.write_text("<html><body><input name='test_input'/></body></html>", encoding="utf-8")
+    page_url = html_file.as_uri()
+
+    config = AppConfig(
+        limits=LimitsConfig(max_turns=5, max_runtime_seconds=60),
+        paths=PathsConfig(runs_dir=tmp_path / "runs"),
+    )
+
+    with BrowserSession(headless=True, user_data_dir=tmp_path / "profile") as session:
+        page = session.get_page()
+
+        blocker_states = ["CAPTCHA: Turnstile challenge", None, None, None]
+        def fake_detect(p):
+            if blocker_states:
+                return blocker_states.pop(0)
+            return None
+
+        on_blocker_mock = MagicMock(return_value=True)
+
+        with patch("jobassist.agent.genai.Client") as mock_client_cls, \
+             patch("jobassist.agent.detect_page_blockers", side_effect=fake_detect):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            mock_chat = MagicMock()
+            mock_client.chats.create.return_value = mock_chat
+
+            mock_fc = MagicMock()
+            mock_fc.name = "finish_inspection"
+            mock_fc.args = {"fields_found": ["Test Input"], "summary": "Inspection done"}
+
+            mock_resp = MagicMock()
+            mock_resp.function_calls = [mock_fc]
+            mock_chat.send_message.return_value = mock_resp
+
+            result = run_dry_run_agent(
+                page=page,
+                job_url=page_url,
+                config=config,
+                run_dir=tmp_path / "run_resume",
+                on_blocker=on_blocker_mock,
+            )
+
+            assert on_blocker_mock.called
+            assert result.status == "completed"
+            assert "Test Input" in result.fields_found
+
+
+def test_dry_run_agent_blocker_unresolved_halts(tmp_path):
+    html_file = tmp_path / "page.html"
+    html_file.write_text("<html><body><h1>Blocked</h1></body></html>", encoding="utf-8")
+    page_url = html_file.as_uri()
+
+    config = AppConfig(
+        limits=LimitsConfig(max_turns=5, max_runtime_seconds=60),
+        paths=PathsConfig(runs_dir=tmp_path / "runs"),
+    )
+
+    with BrowserSession(headless=True, user_data_dir=tmp_path / "profile") as session:
+        page = session.get_page()
+
+        on_blocker_mock = MagicMock(return_value=False)
+
+        with patch("jobassist.agent.genai.Client") as mock_client_cls, \
+             patch("jobassist.agent.detect_page_blockers", return_value="CAPTCHA: Cloudflare Turnstile"):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+
+            result = run_dry_run_agent(
+                page=page,
+                job_url=page_url,
+                config=config,
+                run_dir=tmp_path / "run_block_halt",
+                on_blocker=on_blocker_mock,
+            )
+
+            assert on_blocker_mock.called
+            assert result.status == "blocked"
+            assert "Execution paused" in result.summary
+
+
+def test_agent_model_calls_report_blocker(tmp_path):
+    html_file = tmp_path / "page.html"
+    html_file.write_text("<html><body><h1>Challenge</h1></body></html>", encoding="utf-8")
+    page_url = html_file.as_uri()
+
+    config = AppConfig(
+        limits=LimitsConfig(max_turns=5, max_runtime_seconds=60),
+        paths=PathsConfig(runs_dir=tmp_path / "runs"),
+    )
+
+    with BrowserSession(headless=True, user_data_dir=tmp_path / "profile") as session:
+        page = session.get_page()
+
+        on_blocker_mock = MagicMock(return_value=True)
+
+        with patch("jobassist.agent.genai.Client") as mock_client_cls, \
+             patch("jobassist.agent.detect_page_blockers", return_value=None):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            mock_chat = MagicMock()
+            mock_client.chats.create.return_value = mock_chat
+
+            fc_blocker = MagicMock()
+            fc_blocker.name = "report_blocker"
+            fc_blocker.args = {"blocker_type": "recaptcha", "description": "Interactive image puzzle"}
+            resp1 = MagicMock()
+            resp1.function_calls = [fc_blocker]
+
+            fc_finish = MagicMock()
+            fc_finish.name = "finish_inspection"
+            fc_finish.args = {"fields_found": ["field1"], "summary": "Form analyzed after captcha solved"}
+            resp2 = MagicMock()
+            resp2.function_calls = [fc_finish]
+
+            mock_chat.send_message.side_effect = [resp1, MagicMock(), resp2]
+
+            result = run_dry_run_agent(
+                page=page,
+                job_url=page_url,
+                config=config,
+                run_dir=tmp_path / "run_report_blocker",
+                on_blocker=on_blocker_mock,
+            )
+
+            assert on_blocker_mock.called
+            assert result.status == "completed"
+
+
+def test_form_filling_agent_blocker_pause_and_resume(tmp_path):
+    html_file = tmp_path / "apply.html"
+    html_file.write_text("<html><body><form><input id='name' name='name'/></form></body></html>", encoding="utf-8")
+    page_url = html_file.as_uri()
+
+    profile = load_profile("data/profile.yaml")
+    answers = load_answers("data/answers.yaml")
+    config = AppConfig(paths=PathsConfig(runs_dir=tmp_path / "runs"))
+
+    with BrowserSession(headless=True, user_data_dir=tmp_path / "profile") as session:
+        page = session.get_page()
+
+        blocker_states = ["CAPTCHA: Arkose Labs puzzle", None, None, None]
+        def fake_detect(p):
+            if blocker_states:
+                return blocker_states.pop(0)
+            return None
+
+        on_blocker_mock = MagicMock(return_value=True)
+
+        with patch("jobassist.agent.genai.Client") as mock_client_cls, \
+             patch("jobassist.agent.detect_page_blockers", side_effect=fake_detect):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            mock_chat = MagicMock()
+            mock_client.chats.create.return_value = mock_chat
+
+            mock_finish = MagicMock()
+            mock_finish.name = "finish_form"
+            mock_finish.args = {"summary": "Application filled."}
+
+            mock_resp = MagicMock()
+            mock_resp.function_calls = [mock_finish]
+            mock_chat.send_message.return_value = mock_resp
+
+            result = run_form_filling_agent(
+                page=page,
+                job_url=page_url,
+                config=config,
+                profile=profile,
+                answers=answers,
+                run_dir=tmp_path / "run_form_resume",
+                on_blocker=on_blocker_mock,
+            )
+
+            assert on_blocker_mock.called
+            assert result.status == "completed"
+

@@ -54,7 +54,7 @@ Rules:
 1. In dry-run mode, DO NOT fill in values or click submit buttons.
 2. If you need to view more content down the page to find all fields, call the scroll tool.
 3. If you have inspected the form fields or reached the end of the form, call finish_inspection with the list of fields discovered and a clear summary.
-4. If you see a CAPTCHA, a login wall, or an unexpected error, call finish_inspection with an explanation in summary.
+4. If you visually detect a CAPTCHA, bot challenge puzzle, Cloudflare challenge, or login wall, immediately call report_blocker.
 """
 
 FORM_FILLING_SYSTEM_PROMPT = """You are Odos, an assisted local Job Application Assistant.
@@ -66,7 +66,7 @@ Strict Rules:
 3. NEVER click final "Submit", "Submit Application", or "Send Application" buttons. Odos is strictly safety-gated: when all fields are filled, you must call finish_form to hand control back to the user for manual review and confirmation.
 4. For resume upload, call upload_resume.
 5. Never enter payment information, government IDs / SSN, or passwords.
-6. If you encounter a CAPTCHA, a login wall, or unexpected page, stop and report it via finish_form or ask_user_for_input.
+6. If you visually detect a CAPTCHA, bot challenge puzzle, Cloudflare challenge, or login wall, immediately call report_blocker.
 """
 
 
@@ -120,6 +120,24 @@ def _get_inspection_tool() -> types.Tool:
                         ),
                     },
                     required=["fields_found", "summary"],
+                ),
+            ),
+            types.FunctionDeclaration(
+                name="report_blocker",
+                description="Call this tool immediately if you visually detect a CAPTCHA, bot challenge puzzle, Cloudflare challenge, or login wall on the page.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "blocker_type": types.Schema(
+                            type=types.Type.STRING,
+                            description="Type of blocker detected (e.g. 'captcha', 'turnstile', 'recaptcha', 'login_wall', 'challenge')",
+                        ),
+                        "description": types.Schema(
+                            type=types.Type.STRING,
+                            description="Details, explanation, or instructions for the user",
+                        ),
+                    },
+                    required=["blocker_type"],
                 ),
             ),
         ]
@@ -212,6 +230,24 @@ def _get_filling_tool() -> types.Tool:
                     required=["summary"],
                 ),
             ),
+            types.FunctionDeclaration(
+                name="report_blocker",
+                description="Call this tool immediately if you visually detect a CAPTCHA, bot challenge puzzle, Cloudflare challenge, or login wall on the page.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "blocker_type": types.Schema(
+                            type=types.Type.STRING,
+                            description="Type of blocker detected (e.g. 'captcha', 'turnstile', 'recaptcha', 'login_wall', 'challenge')",
+                        ),
+                        "description": types.Schema(
+                            type=types.Type.STRING,
+                            description="Details, explanation, or instructions for the user",
+                        ),
+                    },
+                    required=["blocker_type"],
+                ),
+            ),
         ]
     )
 
@@ -225,6 +261,7 @@ def run_dry_run_agent(
     session_allowed: Optional[Set[str]] = None,
     on_confirm_domain: Optional[Callable[[str], bool]] = None,
     on_confirm_action: Optional[Callable[[str, str], bool]] = None,
+    on_blocker: Optional[Callable[[str], bool]] = None,
 ) -> AgentResult:
     """Execute the Gemini agent inspection loop on a target job application page."""
     load_dotenv()
@@ -286,11 +323,23 @@ def run_dry_run_agent(
         # Check for CAPTCHA, bot challenges, or login walls
         blocker = detect_page_blockers(page)
         if blocker:
-            status = "blocked"
-            summary_text = f"Safety Gate: Execution paused. {blocker} Handing control over to user."
             log_turn(actual_run_dir, turn, "page_blocker", {"blocker": blocker})
             if on_turn:
                 on_turn(turn, f"[WARN] Safety Gate Alert: {blocker}")
+            if on_blocker:
+                resolved = on_blocker(blocker)
+                if resolved:
+                    still_blocked = detect_page_blockers(page)
+                    if not still_blocked:
+                        log_turn(actual_run_dir, turn, "blocker_resolved", {"blocker": blocker})
+                        if on_turn:
+                            on_turn(turn, "[INFO] Safety Gate: Blocker resolved by user. Resuming agent...")
+                        continue
+                    else:
+                        if on_turn:
+                            on_turn(turn, f"[WARN] Blocker still detected on page: {still_blocked}")
+            status = "blocked"
+            summary_text = f"Safety Gate: Execution paused. {blocker} Handing control over to user."
             break
 
         if on_turn:
@@ -373,6 +422,32 @@ def run_dry_run_agent(
                         response={"result": nav_res},
                     )
                 ])
+            elif fc.name == "report_blocker":
+                blocker_type = args.get("blocker_type", "captcha")
+                desc = args.get("description", "")
+                blocker_msg = f"{blocker_type}: {desc}".strip(": ")
+                log_turn(actual_run_dir, turn, "model_reported_blocker", args)
+                if on_turn:
+                    on_turn(turn, f"[WARN] Agent visually reported blocker: {blocker_msg}")
+                if on_blocker:
+                    resolved = on_blocker(blocker_msg)
+                    if resolved:
+                        still_blocked = detect_page_blockers(page)
+                        if not still_blocked:
+                            log_turn(actual_run_dir, turn, "blocker_resolved", {"reported": blocker_msg})
+                            if on_turn:
+                                on_turn(turn, "[INFO] Safety Gate: Blocker resolved by user. Resuming agent...")
+                            chat.send_message([
+                                types.Part.from_function_response(
+                                    name="report_blocker",
+                                    response={"result": "Blocker resolved by human user. Continue inspection."},
+                                )
+                            ])
+                            continue
+                status = "blocked"
+                summary_text = f"Safety Gate: Inspection stopped due to blocker ({blocker_msg})."
+                finished = True
+                break
 
         if finished:
             break
@@ -417,6 +492,7 @@ def run_form_filling_agent(
     session_allowed: Optional[Set[str]] = None,
     on_confirm_domain: Optional[Callable[[str], bool]] = None,
     on_confirm_action: Optional[Callable[[str, str], bool]] = None,
+    on_blocker: Optional[Callable[[str], bool]] = None,
 ) -> AgentResult:
     """Execute the Gemini agent form filling loop using stored profile, resume, and answers."""
     load_dotenv()
@@ -492,11 +568,23 @@ def run_form_filling_agent(
         # Check for CAPTCHA, bot challenges, or login walls
         blocker = detect_page_blockers(page)
         if blocker:
-            status = "blocked"
-            summary_text = f"Safety Gate: Execution paused. {blocker} Handing control over to user."
             log_turn(actual_run_dir, turn, "page_blocker", {"blocker": blocker})
             if on_turn:
                 on_turn(turn, f"[WARN] Safety Gate Alert: {blocker}")
+            if on_blocker:
+                resolved = on_blocker(blocker)
+                if resolved:
+                    still_blocked = detect_page_blockers(page)
+                    if not still_blocked:
+                        log_turn(actual_run_dir, turn, "blocker_resolved", {"blocker": blocker})
+                        if on_turn:
+                            on_turn(turn, "[INFO] Safety Gate: Blocker resolved by user. Resuming agent...")
+                        continue
+                    else:
+                        if on_turn:
+                            on_turn(turn, f"[WARN] Blocker still detected on page: {still_blocked}")
+            status = "blocked"
+            summary_text = f"Safety Gate: Execution paused. {blocker} Handing control over to user."
             break
 
         if on_turn:
@@ -628,6 +716,33 @@ def run_form_filling_agent(
                 res = {"field": field_name, "user_answer": user_answer}
                 log_turn(actual_run_dir, turn, "ask_user_for_input", res)
                 chat.send_message([types.Part.from_function_response(name="ask_user_for_input", response={"result": res})])
+
+            elif action_name == "report_blocker":
+                blocker_type = args.get("blocker_type", "captcha")
+                desc = args.get("description", "")
+                blocker_msg = f"{blocker_type}: {desc}".strip(": ")
+                log_turn(actual_run_dir, turn, "model_reported_blocker", args)
+                if on_turn:
+                    on_turn(turn, f"[WARN] Agent visually reported blocker: {blocker_msg}")
+                if on_blocker:
+                    resolved = on_blocker(blocker_msg)
+                    if resolved:
+                        still_blocked = detect_page_blockers(page)
+                        if not still_blocked:
+                            log_turn(actual_run_dir, turn, "blocker_resolved", {"reported": blocker_msg})
+                            if on_turn:
+                                on_turn(turn, "[INFO] Safety Gate: Blocker resolved by user. Resuming agent...")
+                            chat.send_message([
+                                types.Part.from_function_response(
+                                    name="report_blocker",
+                                    response={"result": "Blocker resolved by human user. Continue form filling."},
+                                )
+                            ])
+                            continue
+                status = "blocked"
+                summary_text = f"Safety Gate: Form filling stopped due to blocker ({blocker_msg})."
+                finished = True
+                break
 
         if finished:
             break

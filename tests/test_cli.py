@@ -104,6 +104,29 @@ def test_run_command_disallowed_domain_aborts():
     assert "Safety Gate Abort" in result.output
 
 
+def test_run_command_blocked_halt(tmp_path):
+    with patch("jobassist.cli.BrowserSession") as mock_session_cls, \
+         patch("jobassist.cli.run_form_filling_agent") as mock_run_agent:
+        mock_instance = MagicMock()
+        mock_session_cls.return_value = mock_instance
+        mock_instance.start.return_value = MagicMock()
+
+        from jobassist.agent import AgentResult
+        mock_run_agent.return_value = AgentResult(
+            status="blocked",
+            turns=1,
+            summary="Safety Gate: Cloudflare Turnstile challenge detected.",
+            run_dir=tmp_path / "run_blocked",
+            duration_seconds=1.0,
+        )
+
+        result = runner.invoke(app, ["run", "https://example.com/jobs", "--headless"], input="y\n")
+        assert result.exit_code == 0
+        assert "Safety Gate Halt" in result.output
+        assert "Cloudflare Turnstile" in result.output
+        mock_instance.close.assert_called_once()
+
+
 def _create_test_config(tmp_path):
     cfg_path = tmp_path / "test_config.yaml"
     tracker_db = tmp_path / "tracker.db"

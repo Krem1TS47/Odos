@@ -12,7 +12,7 @@ from jobassist.config import load_config, ConfigError
 from jobassist.profile import load_profile, load_answers, ProfileError, AnswersError
 from jobassist.browser import BrowserSession
 from jobassist.agent import run_dry_run_agent, run_form_filling_agent, AgentError
-from jobassist.safety import DomainNotAllowedError, ensure_domain_allowed
+from jobassist.safety import DomainNotAllowedError, ensure_domain_allowed, detect_page_blockers
 from jobassist.tracker import (
     ApplicationTracker,
     VALID_STATUSES,
@@ -334,6 +334,40 @@ def run(
             console.print(f"\n[bold yellow]Agent asks ({field_name}):[/bold yellow] {question}")
             return console.input("[bold cyan]Your answer: [/bold cyan]").strip()
 
+        def on_blocker_callback(blocker_msg: str) -> bool:
+            if headless:
+                console.print(f"\n[bold red]Safety Gate Alert: Blocker detected in headless mode:[/bold red] {blocker_msg}")
+                return False
+
+            console.print(f"\n[bold red]Safety Gate Alert: Blocker / CAPTCHA Detected[/bold red]")
+            console.print(f"Details: [yellow]{blocker_msg}[/yellow]")
+            console.print("[dim]The browser window remains active and open on your screen.[/dim]")
+
+            while True:
+                console.print("\nPlease choose an action:")
+                console.print("  [bold cyan]1[/bold cyan]: Resume agent (I have resolved the challenge in the browser)")
+                console.print("  [bold cyan]2[/bold cyan]: Keep browser open for manual review/submit (hand control to human)")
+                console.print("  [bold cyan]3[/bold cyan]: Abandon / Quit run")
+                choice = console.input("[bold]Select an option [1/2/3] (default 1): [/bold]").strip() or "1"
+
+                if choice == "1":
+                    still_blocked = detect_page_blockers(page)
+                    if still_blocked:
+                        console.print(f"[bold yellow]Blocker is still detected on the page:[/bold yellow] {still_blocked}")
+                        console.print("Please complete the challenge or verification in the browser before resuming.")
+                        continue
+                    else:
+                        console.print("[bold green]Verification passed: Blocker cleared! Resuming agent...[/bold green]")
+                        return True
+                elif choice == "2":
+                    console.print("[bold yellow]Handing control over to you. Agent execution halted.[/bold yellow]")
+                    return False
+                elif choice == "3":
+                    console.print("[yellow]Abandoning run.[/yellow]")
+                    return False
+                else:
+                    console.print("[red]Invalid choice. Please select 1, 2, or 3.[/red]")
+
         if dry_run:
             result = run_dry_run_agent(
                 page=page,
@@ -343,6 +377,7 @@ def run(
                 session_allowed=session_allowed,
                 on_confirm_domain=on_confirm_domain,
                 on_confirm_action=on_confirm_action,
+                on_blocker=on_blocker_callback,
             )
             run_dir_str = str(result.run_dir) if result.run_dir else ""
             if result.status == "completed":
@@ -368,6 +403,7 @@ def run(
                 session_allowed=session_allowed,
                 on_confirm_domain=on_confirm_domain,
                 on_confirm_action=on_confirm_action,
+                on_blocker=on_blocker_callback,
             )
             run_dir_str = str(result.run_dir) if result.run_dir else ""
             if result.status == "completed":

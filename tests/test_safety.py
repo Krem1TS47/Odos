@@ -146,13 +146,48 @@ def test_detect_page_blockers():
     login_page.locator.return_value = login_body
     assert "Login wall" in (detect_page_blockers(login_page) or "")
 
-    # 5. Clean page returns None
+    # 5. Arkose Labs / AWS WAF / PerimeterX detection
+    arkose_page = MagicMock()
+    arkose_page.title.return_value = "Job Application"
+    def arkose_loc(selector):
+        loc = MagicMock()
+        loc.count.return_value = 1 if "arkoselabs" in selector or "funcaptcha" in selector else 0
+        return loc
+    arkose_page.locator.side_effect = arkose_loc
+    assert "arkoselabs" in (detect_page_blockers(arkose_page) or "")
+
+    aws_page = MagicMock()
+    aws_page.title.return_value = "Job Application"
+    def aws_loc(selector):
+        loc = MagicMock()
+        loc.count.return_value = 1 if "aws-waf-captcha" in selector else 0
+        return loc
+    aws_page.locator.side_effect = aws_loc
+    assert "aws-waf-captcha" in (detect_page_blockers(aws_page) or "")
+
+    # 6. Child frame blocker detection
+    framed_page = MagicMock()
+    framed_page.title.return_value = "Job Application"
+    framed_page.locator.return_value = MagicMock(count=MagicMock(return_value=0), inner_text=MagicMock(return_value=""))
+    child_frame = MagicMock()
+    def frame_loc(selector):
+        loc = MagicMock()
+        loc.count.return_value = 1 if "turnstile" in selector else 0
+        return loc
+    child_frame.locator.side_effect = frame_loc
+    framed_page.frames = [child_frame]
+    detected_frame = detect_page_blockers(framed_page) or ""
+    assert "frame" in detected_frame
+    assert "turnstile" in detected_frame
+
+    # 7. Clean page returns None
     clean_page = MagicMock()
     clean_page.title.return_value = "Software Engineer Application"
     clean_body = MagicMock()
     clean_body.count.return_value = 0
     clean_body.inner_text.return_value = "Welcome. Please fill out the form fields below."
     clean_page.locator.return_value = clean_body
+    clean_page.frames = []
     assert detect_page_blockers(clean_page) is None
 
 
