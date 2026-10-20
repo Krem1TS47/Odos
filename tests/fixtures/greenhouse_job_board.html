@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Frontend Engineer at Acme Corp - Application Form</title>
+</head>
+<body>
+  <div id="wrapper">
+    <div id="header">
+      <h1 class="app-title">Frontend Engineer</h1>
+      <span class="company-name">at Acme Corp</span>
+      <div class="location">San Francisco, CA / Remote</div>
+    </div>
+
+    <div id="content">
+      <div id="job-description">
+        <p>Acme Corp is looking for a skilled Frontend Engineer to join our core product team.</p>
+      </div>
+
+      <form id="application_form" action="/jobs/12345/apply" method="POST" enctype="multipart/form-data">
+        <div class="field">
+          <label for="first_name">First Name <span class="asterisk">*</span></label>
+          <input type="text" id="first_name" name="job_application[first_name]" autocomplete="given-name" required />
+        </div>
+
+        <div class="field">
+          <label for="last_name">Last Name <span class="asterisk">*</span></label>
+          <input type="text" id="last_name" name="job_application[last_name]" autocomplete="family-name" required />
+        </div>
+
+        <div class="field">
+          <label for="email">Email <span class="asterisk">*</span></label>
+          <input type="email" id="email" name="job_application[email]" autocomplete="email" required />
+        </div>
+
+        <div class="field">
+          <label for="phone">Phone <span class="asterisk">*</span></label>
+          <input type="tel" id="phone" name="job_application[phone]" autocomplete="tel" required />
+        </div>
+
+        <div class="field">
+          <label for="resume">Resume/CV <span class="asterisk">*</span></label>
+          <input type="file" id="resume" name="job_application[resume]" accept=".pdf,.doc,.docx" required />
+        </div>
+
+        <div class="field">
+          <label for="job_application_location">Location</label>
+          <input type="text" id="job_application_location" name="job_application[location]" placeholder="City, State" />
+        </div>
+
+        <div class="field">
+          <label for="job_application_urls_LinkedIn">LinkedIn Profile</label>
+          <input type="url" id="job_application_urls_LinkedIn" name="job_application[urls][LinkedIn]" />
+        </div>
+
+        <div class="field">
+          <label for="job_application_urls_GitHub">GitHub Profile</label>
+          <input type="url" id="job_application_urls_GitHub" name="job_application[urls][GitHub]" />
+        </div>
+
+        <div class="field">
+          <label for="job_application_urls_Portfolio">Portfolio URL</label>
+          <input type="url" id="job_application_urls_Portfolio" name="job_application[urls][Portfolio]" />
+        </div>
+
+        <div class="field">
+          <label for="question_work_auth">Are you authorized to work in the United States?</label>
+          <select id="question_work_auth" name="job_application[answers][101]">
+            <option value="">-- Please select --</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="question_sponsorship">Will you now or in the future require visa sponsorship?</label>
+          <select id="question_sponsorship" name="job_application[answers][102]">
+            <option value="">-- Please select --</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="question_hear">How did you hear about this job?</label>
+          <input type="text" id="question_hear" name="job_application[answers][103]" />
+        </div>
+
+        <div class="field">
+          <label for="question_why_acme">Why are you interested in working at Acme Corp?</label>
+          <textarea id="question_why_acme" name="job_application[answers][104]" rows="4"></textarea>
+        </div>
+
+        <div class="submit-section">
+          <input type="submit" id="submit_app" value="Submit Application" />
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

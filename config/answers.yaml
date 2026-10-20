@@ -1,0 +1,131 @@
+# ==============================================================================
+# Odos Stored Answers Configuration
+# Reusable answers to common form questions.
+# Categorized into: logistics, eligibility, demographic, motivation, other.
+# Set autofill to true for questions you want automatically prefilled without review.
+# ==============================================================================
+
+answers:
+  # ----------------------------------------------------------------------------
+  # Logistics & Availability Questions
+  # ----------------------------------------------------------------------------
+  - category: logistics
+    patterns:
+      - "How did you hear about this job?"
+      - "How did you hear about this role?"
+      - "How did you hear about us?"
+      - "Where did you find this position?"
+      - "Referral Source"
+    answer: "Company website"
+    autofill: true
+
+  - category: logistics
+    patterns:
+      - "Are you willing to relocate?"
+      - "Are you willing to relocate"
+      - "Willingness to relocate"
+      - "Are you open to relocation?"
+      - "Relocation"
+    answer: "Yes"
+    autofill: true
+
+  - category: logistics
+    patterns:
+      - "Are you available for a 12-week internship?"
+      - "Are you available for a 12 week internship?"
+      - "Are you available for a 12 week internship"
+      - "12-week internship availability"
+      - "Can you commit to a 12-week internship?"
+    answer: "Yes"
+    autofill: true
+
+  - category: logistics
+    patterns:
+      - "Hourly rate expectations"
+      - "Hourly rate expectation"
+      - "What is your hourly rate expectation?"
+      - "Desired hourly rate"
+      - "Expected hourly rate"
+      - "Target hourly pay rate"
+    answer: "Open to discussion / Negotiable"
+    autofill: true
+
+  # ----------------------------------------------------------------------------
+  # Eligibility & Legal Disclosures
+  # ----------------------------------------------------------------------------
+  - category: eligibility
+    patterns:
+      - "Are you at least 18 years old?"
+      - "Are you 18 years of age or older?"
+      - "Age 18 or older"
+    answer: "Yes"
+    autofill: false
+
+  - category: eligibility
+    patterns:
+      - "Are you a government official?"
+      - "Are you currently or formerly a government official?"
+      - "Government official relative"
+    answer: "No"
+    autofill: false
+
+  - category: eligibility
+    patterns:
+      - "Do you have an active security clearance?"
+      - "Active security clearance"
+      - "Active Security Clearance"
+      - "Security clearance status"
+      - "Do you currently hold an active U.S. government security clearance?"
+      - "Do you hold an active security clearance?"
+    answer: "No"
+    autofill: false
+
+  # ----------------------------------------------------------------------------
+  # Voluntary Demographics (EEOC)
+  # ----------------------------------------------------------------------------
+  - category: demographic
+    patterns:
+      - "Race"
+      - "Ethnicity"
+      - "Race / Ethnicity"
+    answer: "Asian"
+    autofill: true
+
+  - category: demographic
+    patterns:
+      - "Veteran Status"
+      - "Are you a protected veteran?"
+    answer: "No"
+    autofill: true
+
+  - category: demographic
+    patterns:
+      - "Disability Status"
+      - "Do you have a disability?"
+    answer: "No"
+    autofill: true
+
+  # ----------------------------------------------------------------------------
+  # Motivation & Open-Ended Questions
+  # ----------------------------------------------------------------------------
+  - category: motivation
+    patterns:
+      - "Why are you interested in this position?"
+      - "Why do you want to work at this company?"
+      - "Why this company?"
+    answer: ""
+    autofill: false
+
+  - category: motivation
+    patterns:
+      - "What are your greatest strengths?"
+      - "Key strengths"
+    answer: ""
+    autofill: false
+
+  - category: motivation
+    patterns:
+      - "What is your greatest accomplishment?"
+      - "Biggest professional achievement"
+    answer: ""
+    autofill: false

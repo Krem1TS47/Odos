@@ -1,0 +1,13 @@
+# Secrets
+.env
+
+# Dependencies
+node_modules/
+
+# Build Output
+dist/
+extension/dist/
+dist.crx
+dist.pem
+
+

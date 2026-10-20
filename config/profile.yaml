@@ -1,0 +1,56 @@
+# ==============================================================================
+# Odos User Profile Configuration
+# Edit this file directly to update your personal information, work eligibility,
+# education, experience, and default resume.
+# Run `npm run build` or `npm run sync` after editing to update the extension.
+# ==============================================================================
+
+contact:
+  first_name: "Benjamin"
+  last_name: "Ching"
+  email: "benbenching@gmail.com"
+  phone: "4088299844"
+  area: "+1"
+  location: "San Jose, California, United States"
+  linkedin: "https://www.linkedin.com/in/benjamin-ching-926264300/"
+  github: "https://github.com/Krem1TS47"
+  website: "http://benjaminching.netlify.app"
+
+work_authorization:
+  authorized_countries:
+    - "Canada"
+    - "United States"
+  requires_sponsorship: false
+
+education:
+  - school: "University of British Columbia"
+    degree: "Bachelor of Science"
+    field: "Computer Science"
+    start_date: "September 2024"
+    end_date: "May 2028"
+    gpa: "3.8"
+
+experience:
+  - company: "Samsung"
+    title: "Data Engineer Co-op"
+    current_role: true
+    start_date: "September 2026"
+    end_date: ""
+    summary: ""
+  - company: "Wistron"
+    title: "Systems Development and Data Analytics Intern"
+    current_role: true
+    start_date: "May 2026"
+    end_date: "August 2026"
+    summary: ""
+
+skills:
+  - "TypeScript"
+  - "React"
+  - "Python"
+  - "SQL"
+  - "Data Engineering"
+
+
+resumes:
+  default: "resumes/Benjamin_Ching_Resume.pdf"
