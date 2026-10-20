@@ -1,0 +1,28 @@
+import {Controller} from '@hotwired/stimulus'
+import {SearchControlBinding} from "sites/search_control"
+
+export default class extends Controller {
+  static values= {autocompleteCategories: String}
+  connect() {
+    SearchControlBinding.setupEasyAutocomplete({
+      cssIdentifier: '.job-search-control',
+      categories: JSON.parse(this.autocompleteCategoriesValue),
+      list: {
+        maxNumberOfElements: 16,
+        sort: {enabled: true}
+      },
+      listItemTemplate: (value, item, index) => {
+        return `<a href="${item.url}"><span id="${SearchControlBinding.cssIdFromItem(item, index)}"><span class="autocomplete-value">${value}</span><span class="autocomplete-count">${item.count ? item.count : ''}</span></span></a>`;
+      },
+    })
+  }
+  
+  submit(e) {
+    e.preventDefault()
+    const form = e.target
+    const queryElement = form.querySelector('input[name="query"]')
+    if (queryElement) {
+        window.location.href = SearchControlBinding.buildUrl(form.action, queryElement.value)
+    }
+  }
+}
