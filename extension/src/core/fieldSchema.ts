@@ -54,6 +54,10 @@ export const SENSITIVE_CANONICAL_FIELDS: ReadonlySet<CanonicalField> = new Set([
   'eeo_disability'
 ]);
 
+export function isFieldSensitive(field: CanonicalField): boolean {
+  return SENSITIVE_CANONICAL_FIELDS.has(field);
+}
+
 /**
  * Resolves the canonical field value from the user profile and stored answers.
  */

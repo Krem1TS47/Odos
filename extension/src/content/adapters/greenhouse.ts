@@ -1,6 +1,7 @@
 import { AtsAdapter, FormField, FormFieldType } from './types';
 import { Job } from '../../core/models';
 import { isSubmitControl } from '../submitGuard';
+import { detectPageCaptcha, CaptchaDetection } from '../captcha';
 
 function escapeCss(str: string): string {
   if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
@@ -11,19 +12,31 @@ function escapeCss(str: string): string {
 
 export class GreenhouseAdapter implements AtsAdapter {
   id = 'greenhouse';
+  name = 'Greenhouse';
 
   matches(url: URL, doc: Document): boolean {
     const isDomain =
       url.hostname.includes('boards.greenhouse.io') ||
-      url.hostname.includes('job-boards.greenhouse.io');
+      url.hostname.includes('job-boards.greenhouse.io') ||
+      url.hostname.includes('boards.eu.greenhouse.io') ||
+      url.hostname.includes('job-boards.eu.greenhouse.io');
 
     if (isDomain) return true;
 
-    // Check for embedded Greenhouse form on employer custom domains
+    // Check for query parameters used by Greenhouse on custom domains
+    if (url.searchParams.has('gh_jid') || url.searchParams.has('gh_src')) {
+      return true;
+    }
+
+    // Check for embedded Greenhouse forms or iframes on employer custom domains
     const hasGreenhouseForm =
       doc.querySelector('form#application_form') !== null ||
       doc.querySelector('form#apply_form') !== null ||
-      doc.querySelector('input[name^="job_application["]') !== null;
+      doc.querySelector('form#application-form') !== null ||
+      doc.querySelector('input[name^="job_application["]') !== null ||
+      doc.querySelector('#grnhse_app') !== null ||
+      doc.querySelector('iframe#grnhse_iframe') !== null ||
+      doc.querySelector('script[src*="greenhouse.io/embed/job_board"]') !== null;
 
     return hasGreenhouseForm;
   }
@@ -35,16 +48,23 @@ export class GreenhouseAdapter implements AtsAdapter {
     if (companyEl?.textContent) {
       company = companyEl.textContent.trim().replace(/^at\s+/i, '').trim();
     } else {
-      // Fallback from URL path: /<company-token>/jobs/...
-      const pathParts = url.pathname.split('/').filter(Boolean);
-      if (pathParts.length >= 1 && pathParts[0] !== 'jobs') {
-        company = pathParts[0].replace(/-/g, ' ');
+      // Check document title "Role at Company"
+      const titleMatch = (doc.title || '').match(/\s+(?:at|@)\s+([^–—|-]+)$/i);
+      if (titleMatch) {
+        company = titleMatch[1].trim();
+      } else {
+        // Fallback from URL path: /<company-token>/jobs/...
+        const pathParts = url.pathname.split('/').filter(Boolean);
+        if (pathParts.length >= 1 && pathParts[0] !== 'jobs') {
+          const raw = pathParts[0].replace(/[-_]/g, ' ');
+          company = raw.charAt(0).toUpperCase() + raw.slice(1);
+        }
       }
     }
 
     // 2. Title
     let title = '';
-    const titleEl = doc.querySelector('.app-title, #header h1, h1.job-title, h1');
+    const titleEl = doc.querySelector('.app-title, #header h1, h1.job-title, h1.section-header, h1');
     if (titleEl?.textContent) {
       title = titleEl.textContent.trim();
     } else {
@@ -53,7 +73,6 @@ export class GreenhouseAdapter implements AtsAdapter {
       const match = rawTitle.match(/^(.*?)\s+(?:at|@)\s+(.*?)(?:\s*[-|–—:]\s*.*)?$/i);
       if (match) {
         title = match[1].trim();
-        if (!company) company = match[2].trim();
       } else {
         title = rawTitle.split(/[-|–—:]/)[0].trim();
       }
@@ -61,14 +80,18 @@ export class GreenhouseAdapter implements AtsAdapter {
 
     // 3. Location
     let location = '';
-    const locationEl = doc.querySelector('.location, #header .location, .job-location');
+    const locationEl = doc.querySelector(
+      '.job__location, .location, #header .location, .job-location'
+    );
     if (locationEl?.textContent) {
       location = locationEl.textContent.trim();
     }
 
     // 4. Job description
     let descriptionText = '';
-    const descEl = doc.querySelector('#job-description, .job-description, #content .job-description');
+    const descEl = doc.querySelector(
+      '#job-description, .job-description, #content .job-description, .job-description--content'
+    );
     if (descEl?.textContent) {
       descriptionText = descEl.textContent.trim();
     }
@@ -85,27 +108,39 @@ export class GreenhouseAdapter implements AtsAdapter {
   discoverFields(doc: Document): FormField[] {
     const form =
       doc.querySelector('form#application_form') ||
+      doc.querySelector('form#application-form') ||
+      doc.querySelector('form.application--form') ||
       doc.querySelector('form#apply_form') ||
       doc.querySelector('form#application') ||
+      doc.querySelector('.application--questions') ||
       doc.querySelector('form');
 
     if (!form) return [];
 
-    const elements = form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-      'input, select, textarea'
+    const elements = form.querySelectorAll<HTMLElement>(
+      'input, select, textarea, [role="combobox"]'
     );
 
     const fields: FormField[] = [];
+    const seenElements = new Set<HTMLElement>();
 
     elements.forEach((el, index) => {
+      if (seenElements.has(el)) return;
+      seenElements.add(el);
+
+      const inputEl = el as HTMLInputElement;
+
       // Ignore hidden inputs, submit controls, and buttons
-      if (el.type === 'hidden' || isSubmitControl(el)) return;
+      if (inputEl.type === 'hidden' || isSubmitControl(el)) return;
+      if (el.tagName === 'BUTTON' && el.getAttribute('role') !== 'combobox') return;
 
       const name = el.getAttribute('name') || '';
       const id = el.getAttribute('id') || `field_${index}`;
 
       // Extract label
       let labelText = '';
+
+      // 1. label[for="id"]
       if (id) {
         const labelEl = doc.querySelector(`label[for="${escapeCss(id)}"]`);
         if (labelEl?.textContent) {
@@ -113,6 +148,26 @@ export class GreenhouseAdapter implements AtsAdapter {
         }
       }
 
+      // 2. id-label (common in modern React Greenhouse boards)
+      if (!labelText && id) {
+        const labelEl = doc.getElementById(`${id}-label`);
+        if (labelEl?.textContent) {
+          labelText = labelEl.textContent;
+        }
+      }
+
+      // 3. aria-labelledby
+      if (!labelText) {
+        const labelledBy = el.getAttribute('aria-labelledby');
+        if (labelledBy) {
+          const labelEl = doc.getElementById(labelledBy);
+          if (labelEl?.textContent) {
+            labelText = labelEl.textContent;
+          }
+        }
+      }
+
+      // 4. Wrapping label
       if (!labelText) {
         const parentLabel = el.closest('label');
         if (parentLabel?.textContent) {
@@ -120,47 +175,52 @@ export class GreenhouseAdapter implements AtsAdapter {
         }
       }
 
+      // 5. Container label
       if (!labelText) {
-        const container = el.closest('.field, .form-group, .input-container');
+        const container = el.closest('.field-wrapper, .field, .form-group, .input-container, .select__container');
         const containerLabel = container?.querySelector('label');
         if (containerLabel?.textContent) {
           labelText = containerLabel.textContent;
         }
       }
 
+      // 6. Attribute fallbacks
       if (!labelText) {
         labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || name;
       }
 
-      // Clean label (remove asterisks, excess whitespace)
+      // Clean label
       const cleanLabel = labelText.replace(/[*]/g, '').trim();
 
       // Determine required
       const isRequired =
-        el.required ||
+        inputEl.required ||
         el.getAttribute('aria-required') === 'true' ||
         labelText.includes('*') ||
-        Boolean(el.closest('.field, .form-group')?.querySelector('.asterisk, .required'));
+        Boolean(el.closest('.field-wrapper, .field, .form-group')?.querySelector('.asterisk, .required, [aria-hidden="true"]'));
 
       // Determine type
       let type: FormFieldType = 'text';
       const tag = el.tagName.toUpperCase();
+      const role = el.getAttribute('role');
 
-      if (tag === 'SELECT') {
+      if (role === 'combobox' || el.classList.contains('select__input')) {
+        type = 'combobox';
+      } else if (tag === 'SELECT') {
         type = 'select';
       } else if (tag === 'TEXTAREA') {
         type = 'textarea';
-      } else if (el.type === 'email') {
+      } else if (inputEl.type === 'email') {
         type = 'email';
-      } else if (el.type === 'tel') {
+      } else if (inputEl.type === 'tel') {
         type = 'tel';
-      } else if (el.type === 'url') {
+      } else if (inputEl.type === 'url') {
         type = 'url';
-      } else if (el.type === 'file') {
+      } else if (inputEl.type === 'file') {
         type = 'file';
-      } else if (el.type === 'checkbox') {
+      } else if (inputEl.type === 'checkbox') {
         type = 'checkbox';
-      } else if (el.type === 'radio') {
+      } else if (inputEl.type === 'radio') {
         type = 'radio';
       }
 
@@ -173,6 +233,8 @@ export class GreenhouseAdapter implements AtsAdapter {
           .filter((txt) => txt && !txt.startsWith('--'));
       }
 
+      const isCustomQuestion = id.startsWith('question_') || name.includes('answers');
+
       fields.push({
         id,
         name,
@@ -180,7 +242,8 @@ export class GreenhouseAdapter implements AtsAdapter {
         type,
         element: el,
         required: isRequired,
-        options
+        options,
+        isCustomQuestion
       });
     });
 
@@ -210,5 +273,9 @@ export class GreenhouseAdapter implements AtsAdapter {
     }
 
     return false;
+  }
+
+  detectCaptcha(doc: Document): CaptchaDetection {
+    return detectPageCaptcha(doc);
   }
 }

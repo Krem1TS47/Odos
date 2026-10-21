@@ -80,8 +80,31 @@ export function getElementLabelText(el: HTMLElement): string {
 
 /**
  * Scored mapping engine: element attributes + label text -> CanonicalField.
+ * Accepts either an ElementContext object or a live HTMLElement (with optional overrides).
  */
-export function mapElementToCanonical(ctx: ElementContext): FieldMappingResult {
+export function mapElementToCanonical(
+  elOrCtx: HTMLElement | ElementContext,
+  overrides?: Partial<ElementContext>
+): FieldMappingResult {
+  let ctx: ElementContext;
+
+  if (typeof (elOrCtx as HTMLElement).nodeType === 'number') {
+    const el = elOrCtx as HTMLElement;
+    const inputEl = el as HTMLInputElement;
+    ctx = {
+      id: el.id || undefined,
+      name: el.getAttribute('name') || undefined,
+      type: inputEl.type || el.tagName.toLowerCase(),
+      autocomplete: el.getAttribute('autocomplete') || undefined,
+      placeholder: el.getAttribute('placeholder') || undefined,
+      labelText: getElementLabelText(el) || undefined,
+      ariaLabel: el.getAttribute('aria-label') || undefined,
+      ...overrides
+    };
+  } else {
+    ctx = { ...(elOrCtx as ElementContext), ...overrides };
+  }
+
   const normLabel = normalizeLabel(ctx.labelText || ctx.ariaLabel || '');
   const autocomplete = (ctx.autocomplete || '').toLowerCase().trim();
   const id = (ctx.id || '').toLowerCase().trim();
@@ -125,6 +148,13 @@ export function mapElementToCanonical(ctx: ElementContext): FieldMappingResult {
   // --------------------------------------------------------------------------
   // 2. ATS-Specific Known Names / IDs (Confidence 0.95)
   // --------------------------------------------------------------------------
+  // Standard Name IDs across ATSs
+  if (name === 'first_name' || id === 'first_name') return { canonical: 'first_name', confidence: 0.95, source: 'known_id', reason: 'known_id:first_name' };
+  if (name === 'last_name' || id === 'last_name') return { canonical: 'last_name', confidence: 0.95, source: 'known_id', reason: 'known_id:last_name' };
+  if (name === 'name' || id === 'name' || name === 'full_name' || id === 'full_name') return { canonical: 'full_name', confidence: 0.95, source: 'known_id', reason: 'known_id:full_name' };
+  if (name === 'email' || id === 'email') return { canonical: 'email', confidence: 0.95, source: 'known_id', reason: 'known_id:email' };
+  if (name === 'phone' || id === 'phone') return { canonical: 'phone', confidence: 0.95, source: 'known_id', reason: 'known_id:phone' };
+
   // Lever exact names
   if (name === 'urls[linkedin]') return { canonical: 'linkedin', confidence: 0.95, source: 'known_id', reason: 'lever:urls[LinkedIn]' };
   if (name === 'urls[github]') return { canonical: 'github', confidence: 0.95, source: 'known_id', reason: 'lever:urls[GitHub]' };

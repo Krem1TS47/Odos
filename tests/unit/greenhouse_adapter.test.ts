@@ -132,4 +132,53 @@ describe('Greenhouse Adapter & Autofill Engine (Fixture Tests)', () => {
 
     expect(adapter.confirmationDetected(activeUrl, document)).toBe(true);
   });
+
+  describe('Modern React Board (job-boards.greenhouse.io)', () => {
+    let modernAdapter: GreenhouseAdapter;
+
+    beforeEach(() => {
+      modernAdapter = new GreenhouseAdapter();
+      const fixturePath = path.resolve(__dirname, '../fixtures/greenhouse/greenhouse_new_board.html');
+      const modernHtml = fs.readFileSync(fixturePath, 'utf-8');
+      document.documentElement.innerHTML = modernHtml;
+    });
+
+    it('matches modern Greenhouse job boards domain and form', () => {
+      const url = new URL('https://job-boards.greenhouse.io/anthropic/jobs/5183044008');
+      expect(modernAdapter.matches(url, document)).toBe(true);
+    });
+
+    it('extracts job details from modern board', () => {
+      const url = new URL('https://job-boards.greenhouse.io/anthropic/jobs/5183044008');
+      const job = modernAdapter.extractJob(document, url);
+
+      expect(job.company).toBe('Anthropic');
+      expect(job.title).toBeTruthy();
+      expect(job.location).toContain('San Francisco');
+    });
+
+    it('discovers fields including React comboboxes and custom question ids', () => {
+      const fields = modernAdapter.discoverFields(document);
+      expect(fields.length).toBeGreaterThanOrEqual(4);
+
+      const fieldIds = fields.map(f => f.id);
+      expect(fieldIds).toContain('first_name');
+      expect(fieldIds).toContain('last_name');
+      expect(fieldIds).toContain('email');
+
+      // Discovers comboboxes
+      const comboboxes = fields.filter(f => f.type === 'combobox');
+      expect(comboboxes.length).toBeGreaterThanOrEqual(2);
+
+      // Custom question combobox
+      const customQuestion = comboboxes.find(f => f.isCustomQuestion);
+      expect(customQuestion).toBeDefined();
+      expect(customQuestion?.id).toMatch(/^question_/);
+      expect(customQuestion?.label).toContain('Constellation application form');
+
+      // Invariant 1: No submit controls discovered
+      const submitControls = fields.filter(f => f.type as any === 'submit' || f.element.tagName === 'BUTTON');
+      expect(submitControls.length).toBe(0);
+    });
+  });
 });
