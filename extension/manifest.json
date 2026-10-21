@@ -12,11 +12,25 @@
     "storage",
     "alarms",
     "notifications",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "*://boards.greenhouse.io/*",
-    "*://job-boards.greenhouse.io/*"
+    "*://job-boards.greenhouse.io/*",
+    "*://boards.eu.greenhouse.io/*",
+    "*://job-boards.eu.greenhouse.io/*",
+    "*://jobs.lever.co/*",
+    "*://jobs.eu.lever.co/*",
+    "*://jobs.ashbyhq.com/*",
+    "*://*.myworkdayjobs.com/*",
+    "*://*.myworkdaysite.com/*",
+    "*://jobs.smartrecruiters.com/*",
+    "*://*.icims.com/*",
+    "*://apply.workable.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -47,7 +61,14 @@
     {
       "matches": [
         "*://boards.greenhouse.io/*",
-        "*://job-boards.greenhouse.io/*"
+        "*://job-boards.greenhouse.io/*",
+        "*://boards.eu.greenhouse.io/*",
+        "*://job-boards.eu.greenhouse.io/*",
+        "*://jobs.lever.co/*",
+        "*://jobs.eu.lever.co/*",
+        "*://jobs.ashbyhq.com/*",
+        "*://*.myworkdayjobs.com/*",
+        "*://*.myworkdaysite.com/*"
       ],
       "js": ["content.js"],
       "all_frames": true,

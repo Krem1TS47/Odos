@@ -4,7 +4,10 @@ import { Sparkles, CheckCircle, AlertCircle, LayoutDashboard } from 'lucide-reac
 
 export const App: React.FC = () => {
   const [currentUrl, setCurrentUrl] = useState<string>('');
-  const [isAtsMatch, setIsAtsMatch] = useState<boolean>(false);
+  const [detectedAts, setDetectedAts] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState<number>(0);
+  const [pageType, setPageType] = useState<'listing' | 'application' | 'unknown'>('unknown');
+  const [jobInfo, setJobInfo] = useState<{ title?: string; company?: string } | null>(null);
   const [appCount, setAppCount] = useState<number>(0);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
@@ -12,14 +15,27 @@ export const App: React.FC = () => {
     // Fetch stats
     repository.listApplications().then((apps) => setAppCount(apps.length));
 
-    // Get current tab
+    // Get current tab & request detection from content script
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tab = tabs[0];
         if (tab?.url) {
           setCurrentUrl(tab.url);
-          const isGreenhouse = /boards\.greenhouse\.io|job-boards\.greenhouse\.io/.test(tab.url);
-          setIsAtsMatch(isGreenhouse);
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, { type: 'GET_DETECTION' }, (response) => {
+              if (response?.success && response.detection) {
+                setDetectedAts(response.detection.ats);
+                setConfidence(response.detection.confidence);
+                setPageType(response.detection.pageType);
+                if (response.detection.jobPosting) {
+                  setJobInfo({
+                    title: response.detection.jobPosting.title,
+                    company: response.detection.jobPosting.company
+                  });
+                }
+              }
+            });
+          }
         }
       });
     }
@@ -70,26 +86,43 @@ export const App: React.FC = () => {
       <div className="space-y-3">
         {/* ATS Recognition Card */}
         <div className={`p-3 rounded-xl border text-xs ${
-          isAtsMatch
+          detectedAts
             ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
             : 'bg-slate-50 border-slate-200 text-slate-600'
         }`}>
-          <div className="flex items-center gap-1.5 font-semibold mb-1">
-            {isAtsMatch ? (
-              <>
-                <CheckCircle className="h-4 w-4 text-emerald-600" />
-                <span>Greenhouse Board Detected</span>
-              </>
-            ) : (
-              <>
-                <AlertCircle className="h-4 w-4 text-slate-500" />
-                <span>Standard Web Page</span>
-              </>
+          <div className="flex items-center justify-between font-semibold mb-1">
+            <div className="flex items-center gap-1.5">
+              {detectedAts ? (
+                <>
+                  <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                  <span className="capitalize">{detectedAts} Detected</span>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="h-4 w-4 text-slate-500 flex-shrink-0" />
+                  <span>Standard Web Page</span>
+                </>
+              )}
+            </div>
+            {detectedAts && (
+              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-mono font-medium">
+                {Math.round(confidence * 100)}%
+              </span>
             )}
           </div>
-          <p className="text-[11px] opacity-80 truncate">
-            {currentUrl ? new URL(currentUrl).hostname : 'No active page'}
-          </p>
+
+          {jobInfo?.title && (
+            <div className="font-medium text-slate-800 mt-1 truncate">
+              {jobInfo.title} {jobInfo.company ? `at ${jobInfo.company}` : ''}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between mt-1 text-[11px] opacity-80">
+            <span className="truncate max-w-[170px]">{currentUrl ? new URL(currentUrl).hostname : 'No active page'}</span>
+            <span className="uppercase text-[9px] font-bold tracking-wider px-1 rounded bg-slate-200/60 text-slate-700">
+              {pageType}
+            </span>
+          </div>
         </div>
 
         {statusMessage && (

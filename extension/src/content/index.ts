@@ -1,6 +1,7 @@
 import { findMatchingAdapter } from './adapters';
 import { executeAutofill } from './autofillEngine';
 import { PrefillBarController } from './prefillBar';
+import { detectAts } from '../detect';
 
 console.log('[Odos] Content script active on:', window.location.href);
 
@@ -16,6 +17,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then((res) => sendResponse({ success: true, status: res }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true; // async response
+  }
+
+  if (message.type === 'GET_DETECTION') {
+    try {
+      const detection = detectAts(window.location.href, document);
+      sendResponse({ success: true, detection });
+    } catch (err: any) {
+      sendResponse({ success: false, error: err.message });
+    }
+    return false;
   }
 });
 

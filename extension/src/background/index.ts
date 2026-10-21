@@ -18,7 +18,24 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'run_odos') {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
-      chrome.tabs.sendMessage(tab.id, { type: 'RUN_ODOS' });
+      try {
+        await chrome.tabs.sendMessage(tab.id, { type: 'RUN_ODOS' });
+      } catch {
+        // Fallback for custom domains via activeTab: inject content script on demand
+        if (chrome.scripting) {
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id, allFrames: true },
+              files: ['content.js']
+            });
+            setTimeout(() => {
+              if (tab.id) chrome.tabs.sendMessage(tab.id, { type: 'RUN_ODOS' });
+            }, 250);
+          } catch (injectErr) {
+            console.warn('[Odos] On-demand script injection failed:', injectErr);
+          }
+        }
+      }
     }
   }
 });
@@ -123,6 +140,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               bundledAt: (bundledConfig as any).bundledAt
             }
           });
+          break;
+        }
+
+        case 'INJECT_CONTENT_SCRIPT': {
+          const tabId = message.tabId;
+          if (chrome.scripting && tabId) {
+            await chrome.scripting.executeScript({
+              target: { tabId, allFrames: true },
+              files: ['content.js']
+            });
+            sendResponse({ success: true });
+          } else {
+            sendResponse({ success: false, error: 'Scripting API not available or tabId missing' });
+          }
           break;
         }
 
