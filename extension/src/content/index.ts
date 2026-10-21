@@ -1,11 +1,12 @@
 import { findMatchingAdapter } from './adapters';
 import { executeAutofill } from './autofillEngine';
-import { PrefillBarController } from './prefillBar';
+import { ReviewPanelController } from './ui/panel';
 import { detectAts } from '../detect';
+import { detectPageCaptcha } from './captcha';
 
 console.log('[Odos] Content script active on:', window.location.href);
 
-let currentBar: PrefillBarController | null = null;
+let currentPanel: ReviewPanelController | null = null;
 let currentApplicationId: string | null = null;
 let currentSnapshot: Record<string, string> = {};
 let currentResumeId: string | undefined = undefined;
@@ -38,6 +39,10 @@ export async function handleRunOdos(): Promise<string> {
     throw new Error('No supported ATS form detected on this page.');
   }
 
+  // Detect ATS scoring & CAPTCHA status
+  const detection = detectAts(window.location.href, document);
+  const captcha = adapter.detectCaptcha ? adapter.detectCaptcha(document) : detectPageCaptcha(document);
+
   // 1. Extract Job Details
   const jobPartial = adapter.extractJob(document, currentUrl);
 
@@ -45,6 +50,14 @@ export async function handleRunOdos(): Promise<string> {
   const fields = adapter.discoverFields(document);
   if (fields.length === 0) {
     throw new Error('No interactive form fields discovered on this page.');
+  }
+
+  // Snapshot initial field values before filling (for Undo capability)
+  const initialSnapshot: Record<string, string> = {};
+  for (const f of fields) {
+    if (f.element instanceof HTMLInputElement || f.element instanceof HTMLTextAreaElement || f.element instanceof HTMLSelectElement) {
+      initialSnapshot[f.name || f.id] = f.element.value;
+    }
   }
 
   // 3. Request Profile and Stored Answers from Background (Single request per page: Section 6)
@@ -101,21 +114,35 @@ export async function handleRunOdos(): Promise<string> {
   currentSnapshot = fillResult.fieldValuesSnapshot;
 
   // 7. Render Review Panel in Closed Shadow DOM
-  if (currentBar) {
-    currentBar.destroy();
+  if (currentPanel) {
+    currentPanel.destroy();
   }
 
-  currentBar = new PrefillBarController({
+  currentPanel = new ReviewPanelController({
     job,
     application,
+    detection,
+    atsName: adapter.name,
     filledFields: fillResult.filledFields,
     emptyFields: fillResult.emptyFields,
+    captcha,
     isDuplicate,
     onConfirmSubmitted: () => {
       markSubmitted();
+    },
+    onUndoPrefill: () => {
+      for (const f of fillResult.filledFields) {
+        if (f.element instanceof HTMLInputElement || f.element instanceof HTMLTextAreaElement || f.element instanceof HTMLSelectElement) {
+          f.element.value = initialSnapshot[f.name || f.id] || '';
+        }
+      }
+      if (currentPanel) {
+        currentPanel.destroy();
+        currentPanel = null;
+      }
     }
   });
-  currentBar.render();
+  currentPanel.render();
 
   // 8. Attach Post-Submit Observer
   setupPostSubmitObserver(adapter);
@@ -135,8 +162,8 @@ function markSubmitted(): void {
     }
   });
 
-  if (currentBar) {
-    currentBar.showSubmittedNotice();
+  if (currentPanel) {
+    currentPanel.showSubmittedNotice();
   }
 }
 
