@@ -1,7 +1,20 @@
 import React, { useState } from 'react';
 import { Application, ApplicationStatus, Job } from '../../core/models';
 import { repository } from '../../core/storage/repository';
-import { Briefcase, Eye, MessageSquare, ExternalLink, Search, ArrowUpDown, X } from 'lucide-react';
+import { Briefcase, Eye, MessageSquare, ExternalLink, Search, ArrowUpDown } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import { Input } from '../../components/ui/input';
+import { Textarea } from '../../components/ui/textarea';
+import { Label } from '../../components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '../../components/ui/dialog';
 
 interface Props {
   applications: Application[];
@@ -81,122 +94,97 @@ export const ApplicationsView: React.FC<Props> = ({ applications, jobs, onUpdate
     }
   };
 
-  const getStatusBadge = (status: ApplicationStatus) => {
-    switch (status) {
-      case 'prefilled':
-        return 'bg-amber-50 text-amber-700 border-amber-200';
-      case 'submitted':
-        return 'bg-blue-50 text-blue-700 border-blue-200';
-      case 'interviewing':
-        return 'bg-purple-50 text-purple-700 border-purple-200';
-      case 'offer':
-        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-      case 'rejected':
-        return 'bg-rose-50 text-rose-700 border-rose-200';
-      case 'withdrawn':
-        return 'bg-slate-100 text-slate-700 border-slate-200';
-      case 'abandoned':
-        return 'bg-gray-100 text-gray-500 border-gray-200';
-      default:
-        return 'bg-slate-50 text-slate-700 border-slate-200';
-    }
-  };
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Search & Filter Controls */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
           {['all', 'prefilled', 'submitted', 'interviewing', 'offer', 'rejected'].map((status) => (
-            <button
+            <Button
               key={status}
               type="button"
+              variant={filterStatus === status ? 'default' : 'outline'}
+              size="sm"
               onClick={() => setFilterStatus(status)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
-                filterStatus === status
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-              }`}
+              className="capitalize text-xs font-normal"
             >
               {status}
-            </button>
+            </Button>
           ))}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <div className="relative flex-1 sm:w-56">
-            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-            <input
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
               type="text"
-              placeholder="Filter company or role..."
+              placeholder="Search company or role..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs focus:border-indigo-500 focus:outline-none"
+              className="pl-8 h-8 text-xs"
             />
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs text-slate-600">
-            <ArrowUpDown className="h-3.5 w-3.5 text-slate-400" />
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <ArrowUpDown className="h-3.5 w-3.5 flex-shrink-0" />
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs focus:outline-none"
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
             >
               <option value="date_desc">Newest First</option>
               <option value="date_asc">Oldest First</option>
-              <option value="company">Company Name</option>
+              <option value="company">Company</option>
             </select>
           </div>
         </div>
       </div>
 
       {filteredApps.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-600 mb-3">
-            <Briefcase className="h-6 w-6" />
+        <div className="rounded-xl border border-dashed border-border bg-card p-12 text-center">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-foreground mb-3">
+            <Briefcase className="h-5 w-5" />
           </div>
-          <h3 className="text-sm font-semibold text-slate-900">No applications found</h3>
-          <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+          <h3 className="text-sm font-semibold text-foreground">No applications found</h3>
+          <p className="mt-1 text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
             {searchQuery || filterStatus !== 'all'
-              ? 'No applications match your active filters.'
-              : 'Open a job application page (Greenhouse) and press Alt+Shift+O. Odos will prefill the form and log it automatically here.'}
+              ? 'No applications match your active search or filters.'
+              : 'Open any job application page and click Prefill in the Odos extension. Your applications and submitted answer snapshots will be logged here.'}
           </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold text-slate-500">
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <table className="min-w-full divide-y divide-border text-left text-xs">
+            <thead className="bg-muted/40 font-medium text-muted-foreground">
               <tr>
-                <th className="px-5 py-3">Company & Role</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Prefilled Date</th>
-                <th className="px-5 py-3">Submitted Date</th>
-                <th className="px-5 py-3 text-right">Actions</th>
+                <th className="px-5 py-3 font-medium">Company & Role</th>
+                <th className="px-5 py-3 font-medium">Status</th>
+                <th className="px-5 py-3 font-medium">Prefilled</th>
+                <th className="px-5 py-3 font-medium">Submitted</th>
+                <th className="px-5 py-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border/60">
               {filteredApps.map((app) => {
                 const job = jobsMap.get(app.jobId);
                 return (
-                  <tr key={app.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-5 py-3.5">
-                      <div className="font-semibold text-slate-900">{job?.company || 'Unknown Company'}</div>
-                      <div className="text-xs text-slate-500">{job?.title || 'Job Application'}</div>
+                  <tr key={app.id} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-5 py-3">
+                      <div className="font-medium text-foreground">{job?.company || 'Unknown Company'}</div>
+                      <div className="text-[11px] text-muted-foreground">{job?.title || 'Job Application'}</div>
                       {app.notes && (
-                        <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-600 italic">
-                          <MessageSquare className="h-3 w-3 text-indigo-500 flex-shrink-0" />
+                        <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground italic">
+                          <MessageSquare className="h-3 w-3 flex-shrink-0" />
                           <span className="truncate max-w-xs">{app.notes.split('\n')[0]}</span>
                         </div>
                       )}
                     </td>
 
-                    <td className="px-5 py-3.5">
+                    <td className="px-5 py-3">
                       <select
                         value={app.status}
                         onChange={(e) => handleStatusChange(app.id, e.target.value as ApplicationStatus)}
-                        className={`rounded-lg border px-2.5 py-1 text-xs font-medium cursor-pointer focus:outline-none ${getStatusBadge(
-                          app.status
-                        )}`}
+                        className="h-7 rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       >
                         {ALL_STATUSES.map((st) => (
                           <option key={st} value={st}>
@@ -206,7 +194,7 @@ export const ApplicationsView: React.FC<Props> = ({ applications, jobs, onUpdate
                       </select>
                     </td>
 
-                    <td className="px-5 py-3.5 text-xs text-slate-600">
+                    <td className="px-5 py-3 text-muted-foreground font-mono text-[11px]">
                       {new Date(app.prefilledAt).toLocaleDateString(undefined, {
                         month: 'short',
                         day: 'numeric',
@@ -214,49 +202,57 @@ export const ApplicationsView: React.FC<Props> = ({ applications, jobs, onUpdate
                       })}
                     </td>
 
-                    <td className="px-5 py-3.5 text-xs text-slate-600">
+                    <td className="px-5 py-3 text-muted-foreground font-mono text-[11px]">
                       {app.submittedAt
                         ? new Date(app.submittedAt).toLocaleDateString(undefined, {
                             month: 'short',
                             day: 'numeric',
                             year: 'numeric'
                           })
-                        : <span className="text-slate-400">—</span>}
+                        : <span className="opacity-40">—</span>}
                     </td>
 
-                    <td className="px-5 py-3.5 text-right">
-                      <div className="inline-flex items-center gap-2">
+                    <td className="px-5 py-3 text-right">
+                      <div className="inline-flex items-center gap-1.5">
                         {app.submittedAnswers && Object.keys(app.submittedAnswers).length > 0 && (
-                          <button
-                            type="button"
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setSnapshotModalApp({ app, job })}
                             title="View submitted snapshot (Interview prep)"
-                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            className="h-7 px-2 text-[11px] gap-1 font-normal"
                           >
-                            <Eye className="h-3.5 w-3.5 text-indigo-600" />
+                            <Eye className="h-3 w-3" />
                             Answers
-                          </button>
+                          </Button>
                         )}
 
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => setNotesModalApp({ app, job, noteText: '' })}
                           title="Add/View notes"
-                          className="rounded-lg border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
                         >
                           <MessageSquare className="h-3.5 w-3.5" />
-                        </button>
+                        </Button>
 
                         {job?.url && (
-                          <a
-                            href={job.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            title="Open job URL"
-                            className="rounded-lg border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            asChild
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
                           >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
+                            <a
+                              href={job.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Open job posting URL"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                          </Button>
                         )}
                       </div>
                     </td>
@@ -269,98 +265,73 @@ export const ApplicationsView: React.FC<Props> = ({ applications, jobs, onUpdate
       )}
 
       {/* "What Did I Submit?" Snapshot Modal */}
-      {snapshotModalApp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="relative w-full max-w-xl rounded-xl bg-white p-6 shadow-2xl max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between border-b pb-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  {snapshotModalApp.job?.company} — Submitted Snapshot
-                </h3>
-                <p className="text-xs text-slate-500">{snapshotModalApp.job?.title} (Interview Prep)</p>
-              </div>
-              <button
-                onClick={() => setSnapshotModalApp(null)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+      <Dialog open={Boolean(snapshotModalApp)} onOpenChange={(open) => !open && setSnapshotModalApp(null)}>
+        <DialogContent className="max-w-xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{snapshotModalApp?.job?.company || 'Application'} — Submitted Snapshot</DialogTitle>
+            <DialogDescription>
+              {snapshotModalApp?.job?.title} • Answers saved at submission time for interview prep.
+            </DialogDescription>
+          </DialogHeader>
 
-            <div className="mt-4 flex-1 overflow-y-auto space-y-3">
-              {Object.entries(snapshotModalApp.app.submittedAnswers || {}).map(([key, val]) => (
-                <div key={key} className="rounded-lg border border-slate-100 bg-slate-50/70 p-3">
-                  <div className="text-xs font-semibold text-slate-700 capitalize">{key.replace(/[_\\[\\]]/g, ' ')}</div>
-                  <div className="mt-1 text-xs text-slate-900 font-mono whitespace-pre-wrap">{val}</div>
+          <div className="flex-1 overflow-y-auto space-y-2 py-2 pr-1 max-h-[60vh]">
+            {Object.entries(snapshotModalApp?.app.submittedAnswers || {}).map(([key, val]) => (
+              <div key={key} className="rounded-lg border border-border bg-muted/40 p-3">
+                <div className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
+                  {key.replace(/[_\\[\\]]/g, ' ')}
                 </div>
-              ))}
-            </div>
-
-            <div className="mt-4 pt-3 border-t flex justify-end">
-              <button
-                type="button"
-                onClick={() => setSnapshotModalApp(null)}
-                className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
-              >
-                Close
-              </button>
-            </div>
+                <div className="mt-1 text-xs text-foreground font-mono whitespace-pre-wrap leading-relaxed">
+                  {val}
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-      )}
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setSnapshotModalApp(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Notes Modal */}
-      {notesModalApp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="relative w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="text-sm font-bold text-slate-900">
-                Application Notes: {notesModalApp.job?.company}
-              </h3>
-              <button
-                onClick={() => setNotesModalApp(null)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+      <Dialog open={Boolean(notesModalApp)} onOpenChange={(open) => !open && setNotesModalApp(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Notes: {notesModalApp?.job?.company}</DialogTitle>
+            <DialogDescription>
+              Record interview dates, contact details, or notes about this role.
+            </DialogDescription>
+          </DialogHeader>
 
-            {notesModalApp.app.notes && (
-              <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-100 text-xs text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto">
-                {notesModalApp.app.notes}
-              </div>
-            )}
-
-            <div className="mt-4">
-              <label className="block text-xs font-medium text-slate-700 mb-1">Add Note / Interview Stage Update</label>
-              <textarea
-                rows={3}
-                value={notesModalApp.noteText}
-                onChange={(e) => setNotesModalApp({ ...notesModalApp, noteText: e.target.value })}
-                placeholder="e.g. Recruiter phone screen scheduled for next Tuesday..."
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:border-indigo-500 focus:outline-none"
-              />
+          {notesModalApp?.app.notes && (
+            <div className="p-3 bg-muted/50 rounded-lg border border-border text-xs text-foreground whitespace-pre-wrap max-h-40 overflow-y-auto font-mono">
+              {notesModalApp.app.notes}
             </div>
+          )}
 
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setNotesModalApp(null)}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveNote}
-                className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
-              >
-                Save Note
-              </button>
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="note-input">Add Note</Label>
+            <Textarea
+              id="note-input"
+              rows={3}
+              value={notesModalApp?.noteText || ''}
+              onChange={(e) => notesModalApp && setNotesModalApp({ ...notesModalApp, noteText: e.target.value })}
+              placeholder="e.g. Recruiter phone screen scheduled for next Tuesday..."
+            />
           </div>
-        </div>
-      )}
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" size="sm" onClick={() => setNotesModalApp(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSaveNote}>
+              Save Note
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { repository } from '../core/storage/repository';
-import { Sparkles, CheckCircle, AlertCircle, LayoutDashboard } from 'lucide-react';
+import { Sparkles, LayoutDashboard, Globe, Check, AlertCircle } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
+import { Card, CardContent } from '../components/ui/card';
+import { Separator } from '../components/ui/separator';
 
 export const App: React.FC = () => {
   const [currentUrl, setCurrentUrl] = useState<string>('');
@@ -10,6 +14,7 @@ export const App: React.FC = () => {
   const [jobInfo, setJobInfo] = useState<{ title?: string; company?: string } | null>(null);
   const [appCount, setAppCount] = useState<number>(0);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [isRunning, setIsRunning] = useState<boolean>(false);
 
   useEffect(() => {
     // Fetch stats
@@ -50,106 +55,139 @@ export const App: React.FC = () => {
   };
 
   const handleRunOdos = () => {
+    setIsRunning(true);
+    setStatusMessage(null);
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tab = tabs[0];
         if (tab?.id) {
           chrome.tabs.sendMessage(tab.id, { type: 'RUN_ODOS' }, (response) => {
+            setIsRunning(false);
             if (chrome.runtime.lastError) {
-              setStatusMessage('Content script not active on this page yet.');
+              setStatusMessage('Content script not active on this page yet. Refresh and try again.');
             } else if (response?.status) {
               setStatusMessage(response.status);
             }
           });
+        } else {
+          setIsRunning(false);
         }
       });
+    } else {
+      setIsRunning(false);
     }
   };
 
+  const hostName = currentUrl ? (() => {
+    try {
+      return new URL(currentUrl).hostname;
+    } catch {
+      return currentUrl;
+    }
+  })() : 'No active page';
+
   return (
-    <div className="p-4 bg-white min-w-[300px]">
-      <div className="flex items-center justify-between border-b pb-3 mb-3">
-        <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">
+    <div className="w-[320px] bg-background text-foreground p-4 select-none">
+      {/* Top Header */}
+      <div className="flex items-center justify-between pb-3">
+        <div className="flex items-center gap-2.5">
+          <div className="h-7 w-7 rounded-md bg-zinc-950 text-white flex items-center justify-center font-bold text-xs shadow-sm ring-1 ring-zinc-800">
             O
           </div>
           <div>
-            <h1 className="text-sm font-bold text-slate-900 leading-tight">Odos</h1>
-            <span className="text-[10px] text-slate-500">Job Application Hub</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-sm tracking-tight text-foreground">Odos</span>
+              <span className="text-[10px] text-muted-foreground font-mono">v2.0</span>
+            </div>
           </div>
         </div>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+        <Badge variant="secondary" className="font-mono text-[10px] px-2 py-0.5">
           {appCount} Applied
-        </span>
+        </Badge>
       </div>
 
-      <div className="space-y-3">
-        {/* ATS Recognition Card */}
-        <div className={`p-3 rounded-xl border text-xs ${
-          detectedAts
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : 'bg-slate-50 border-slate-200 text-slate-600'
-        }`}>
-          <div className="flex items-center justify-between font-semibold mb-1">
-            <div className="flex items-center gap-1.5">
-              {detectedAts ? (
-                <>
-                  <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                  <span className="capitalize">{detectedAts} Detected</span>
-                </>
-              ) : (
-                <>
-                  <AlertCircle className="h-4 w-4 text-slate-500 flex-shrink-0" />
-                  <span>Standard Web Page</span>
-                </>
+      <Separator className="my-2" />
+
+      {/* Main Detection Card */}
+      <div className="space-y-3 py-1">
+        <Card className="border-border bg-card shadow-sm">
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                {detectedAts ? (
+                  <>
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-zinc-950 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-zinc-950"></span>
+                    </span>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                      {detectedAts}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs font-medium text-muted-foreground">Standard Page</span>
+                  </>
+                )}
+              </div>
+
+              {detectedAts && (
+                <Badge variant="outline" className="font-mono text-[10px] py-0 px-1.5 font-normal">
+                  {Math.round(confidence * 100)}% match
+                </Badge>
               )}
             </div>
-            {detectedAts && (
-              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-mono font-medium">
-                {Math.round(confidence * 100)}%
-              </span>
-            )}
-          </div>
 
-          {jobInfo?.title && (
-            <div className="font-medium text-slate-800 mt-1 truncate">
-              {jobInfo.title} {jobInfo.company ? `at ${jobInfo.company}` : ''}
+            {jobInfo?.title ? (
+              <div className="border-t border-border/60 pt-1.5">
+                <div className="text-xs font-medium text-foreground truncate">
+                  {jobInfo.title}
+                </div>
+                {jobInfo.company && (
+                  <div className="text-[11px] text-muted-foreground truncate">
+                    {jobInfo.company}
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            <div className="flex items-center justify-between pt-1 text-[11px] text-muted-foreground">
+              <span className="truncate max-w-[170px]" title={hostName}>{hostName}</span>
+              <Badge variant="secondary" className="text-[9px] uppercase tracking-wider px-1.5 py-0 h-4 font-mono">
+                {pageType}
+              </Badge>
             </div>
-          )}
-
-          <div className="flex items-center justify-between mt-1 text-[11px] opacity-80">
-            <span className="truncate max-w-[170px]">{currentUrl ? new URL(currentUrl).hostname : 'No active page'}</span>
-            <span className="uppercase text-[9px] font-bold tracking-wider px-1 rounded bg-slate-200/60 text-slate-700">
-              {pageType}
-            </span>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {statusMessage && (
-          <div className="p-2 rounded bg-indigo-50 border border-indigo-100 text-[11px] text-indigo-700">
-            {statusMessage}
+          <div className="rounded-md border border-border bg-muted/60 p-2.5 text-[11px] text-foreground leading-relaxed flex items-start gap-1.5">
+            <Check className="h-3.5 w-3.5 text-foreground flex-shrink-0 mt-0.5" />
+            <span>{statusMessage}</span>
           </div>
         )}
 
-        {/* Primary Action Button */}
-        <button
-          type="button"
-          onClick={handleRunOdos}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 transition-colors"
-        >
-          <Sparkles className="h-4 w-4" />
-          Run Odos Prefill (Alt+Shift+O)
-        </button>
+        {/* Action Buttons */}
+        <div className="space-y-2 pt-1">
+          <Button
+            onClick={handleRunOdos}
+            disabled={isRunning}
+            className="w-full h-9 gap-2 font-medium"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {isRunning ? 'Prefilling Form...' : 'Prefill Application'}
+          </Button>
 
-        {/* Dashboard Link */}
-        <button
-          type="button"
-          onClick={handleOpenDashboard}
-          className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-        >
-          <LayoutDashboard className="h-3.5 w-3.5 text-slate-500" />
-          Open Full Dashboard
-        </button>
+          <Button
+            variant="outline"
+            onClick={handleOpenDashboard}
+            className="w-full h-8 text-xs font-normal gap-1.5 text-muted-foreground hover:text-foreground"
+          >
+            <LayoutDashboard className="h-3.5 w-3.5" />
+            Open Dashboard
+          </Button>
+        </div>
       </div>
     </div>
   );

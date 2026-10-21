@@ -22,7 +22,9 @@
       "@background/*": ["extension/src/background/*"],
       "@dashboard/*": ["extension/src/dashboard/*"],
       "@popup/*": ["extension/src/popup/*"],
-      "@llm/*": ["extension/src/llm/*"]
+      "@llm/*": ["extension/src/llm/*"],
+      "@ui/*": ["extension/src/components/ui/*"],
+      "@lib/*": ["extension/src/lib/*"]
     }
   },
   "include": ["extension/src", "tests", "scripts"]

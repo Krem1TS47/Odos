@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { StoredAnswer, StoredAnswerCategory } from '../../core/models';
 import { repository } from '../../core/storage/repository';
 import { Plus, Trash2, Sparkles, Pencil, Check, X } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import { Textarea } from '../../components/ui/textarea';
+import { Label } from '../../components/ui/label';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
 
 interface Props {
   answers: StoredAnswer[];
@@ -28,9 +33,8 @@ export const AnswersEditor: React.FC<Props> = ({ answers, onUpdate }) => {
     : answers.filter((a) => a.category === selectedCategory);
 
   const handleToggleAutoFill = async (answer: StoredAnswer) => {
-    // Sensitive categories require explicit confirmation if turning on autoFill
     if ((answer.category === 'eligibility' || answer.category === 'demographic') && !answer.autoFill) {
-      if (!confirm('Warning: Auto-filling legal eligibility or demographic answers is not recommended. Are you sure you want to enable autofill for this answer?')) {
+      if (!confirm('Warning: Auto-filling legal eligibility or demographic answers is not recommended without review. Are you sure you want to enable autofill for this answer?')) {
         return;
       }
     }
@@ -106,291 +110,272 @@ export const AnswersEditor: React.FC<Props> = ({ answers, onUpdate }) => {
     onUpdate();
   };
 
-  const categoryBadgeColor = (category: StoredAnswerCategory) => {
-    switch (category) {
-      case 'eligibility':
-        return 'bg-amber-100 text-amber-800 border-amber-200';
-      case 'demographic':
-        return 'bg-purple-100 text-purple-800 border-purple-200';
-      case 'motivation':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'logistics':
-        return 'bg-emerald-100 text-emerald-800 border-emerald-200';
-      default:
-        return 'bg-slate-100 text-slate-800 border-slate-200';
-    }
-  };
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
           {['all', 'eligibility', 'demographic', 'motivation', 'logistics', 'other'].map((cat) => (
-            <button
+            <Button
               key={cat}
               type="button"
+              variant={selectedCategory === cat ? 'default' : 'outline'}
+              size="sm"
               onClick={() => setSelectedCategory(cat)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
-                selectedCategory === cat
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-              }`}
+              className="capitalize text-xs font-normal"
             >
               {cat}
-            </button>
+            </Button>
           ))}
         </div>
 
-        <button
-          type="button"
+        <Button
+          size="sm"
           onClick={() => setIsAdding(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-medium text-white shadow-sm hover:bg-indigo-700"
+          className="gap-1.5 text-xs font-medium"
         >
-          <Plus className="h-4 w-4" /> Add Answer
-        </button>
+          <Plus className="h-3.5 w-3.5" /> Add Answer
+        </Button>
       </div>
 
-      {/* Add Modal/Card */}
+      {/* Add Card */}
       {isAdding && (
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-6 shadow-sm space-y-4">
-          <h4 className="text-sm font-semibold text-indigo-900">Add New Stored Answer</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Question Patterns (one per line)
-              </label>
-              <textarea
-                rows={3}
-                value={newQuestion}
-                onChange={(e) => setNewQuestion(e.target.value)}
-                placeholder="e.g. How did you hear about this role?&#10;Where did you find this position?"
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Answer</label>
-              <textarea
-                rows={3}
-                value={newAnswer}
-                onChange={(e) => setNewAnswer(e.target.value)}
-                placeholder="e.g. Company Website / Careers page"
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between pt-2">
-            <div className="flex items-center gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Category</label>
-                <select
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value as StoredAnswerCategory)}
-                  className="rounded border border-slate-300 p-1.5 text-xs focus:outline-none"
-                >
-                  <option value="eligibility">Eligibility</option>
-                  <option value="demographic">Demographic</option>
-                  <option value="motivation">Motivation</option>
-                  <option value="logistics">Logistics</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2 pt-5">
-                <input
-                  type="checkbox"
-                  id="newAutofill"
-                  checked={newAutoFill}
-                  onChange={(e) => setNewAutoFill(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+        <Card className="border-border bg-card shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold">New Stored Answer</CardTitle>
+            <CardDescription>
+              Provide patterns or questions Odos should match against, and the default response.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="new-question">Question Patterns (one per line)</Label>
+                <Textarea
+                  id="new-question"
+                  rows={3}
+                  value={newQuestion}
+                  onChange={(e) => setNewQuestion(e.target.value)}
+                  placeholder="e.g. How did you hear about this role?&#10;Where did you find this position?"
                 />
-                <label htmlFor="newAutofill" className="text-xs text-slate-700">
-                  Allow Autofill without manual confirmation
-                </label>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="new-answer">Stored Answer</Label>
+                <Textarea
+                  id="new-answer"
+                  rows={3}
+                  value={newAnswer}
+                  onChange={(e) => setNewAnswer(e.target.value)}
+                  placeholder="e.g. Company Website / Careers page"
+                />
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsAdding(false)}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleCreate}
-                className="rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
-              >
-                Save Answer
-              </button>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-2 gap-4 border-t border-border/60">
+              <div className="flex items-center gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="new-category" className="text-[11px]">Category</Label>
+                  <select
+                    id="new-category"
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value as StoredAnswerCategory)}
+                    className="h-8 rounded-md border border-input bg-background px-2.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+                  >
+                    <option value="eligibility">Eligibility</option>
+                    <option value="demographic">Demographic</option>
+                    <option value="motivation">Motivation</option>
+                    <option value="logistics">Logistics</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center space-x-2 pt-4">
+                  <input
+                    type="checkbox"
+                    id="newAutofill"
+                    checked={newAutoFill}
+                    onChange={(e) => setNewAutoFill(e.target.checked)}
+                    className="h-4 w-4 rounded border-input bg-background text-zinc-950 focus:ring-1 focus:ring-ring cursor-pointer"
+                  />
+                  <Label htmlFor="newAutofill" className="cursor-pointer text-xs font-normal">
+                    Auto-fill without requiring manual review
+                  </Label>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsAdding(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleCreate}
+                >
+                  Save Answer
+                </Button>
+              </div>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Answers List */}
       {filteredAnswers.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center bg-white">
-          <p className="text-sm text-slate-500 italic">No stored answers found for this category.</p>
+        <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center">
+          <p className="text-xs text-muted-foreground italic">No stored answers found for this category.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {filteredAnswers.map((ans) => {
             const isEditing = editingId === ans.id;
 
             if (isEditing) {
               return (
-                <div
-                  key={ans.id}
-                  className="rounded-xl border border-indigo-300 bg-indigo-50/30 p-5 shadow-sm space-y-4"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-indigo-900">Editing Answer</span>
-                    <button
-                      type="button"
+                <Card key={ans.id} className="border-border bg-card shadow-sm">
+                  <CardHeader className="flex flex-row items-center justify-between pb-3">
+                    <CardTitle className="text-xs font-semibold">Editing Answer</CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       onClick={cancelEdit}
-                      className="text-slate-400 hover:text-slate-600"
+                      className="h-6 w-6 text-muted-foreground"
                     >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Question Patterns (one per line)
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={editPatterns}
-                        onChange={(e) => setEditPatterns(e.target.value)}
-                        className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:outline-none focus:border-indigo-500 bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">Answer</label>
-                      <textarea
-                        rows={3}
-                        value={editAnswer}
-                        onChange={(e) => setEditAnswer(e.target.value)}
-                        className="w-full rounded-lg border border-slate-300 p-2 text-xs focus:outline-none focus:border-indigo-500 bg-white"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2">
-                    <div className="flex items-center gap-4">
-                      <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">Category</label>
-                        <select
-                          value={editCategory}
-                          onChange={(e) => setEditCategory(e.target.value as StoredAnswerCategory)}
-                          className="rounded border border-slate-300 p-1.5 text-xs focus:outline-none bg-white"
-                        >
-                          <option value="eligibility">Eligibility</option>
-                          <option value="demographic">Demographic</option>
-                          <option value="motivation">Motivation</option>
-                          <option value="logistics">Logistics</option>
-                          <option value="other">Other</option>
-                        </select>
-                      </div>
-
-                      <div className="flex items-center gap-2 pt-5">
-                        <input
-                          type="checkbox"
-                          id={`editAutofill_${ans.id}`}
-                          checked={editAutoFill}
-                          onChange={(e) => setEditAutoFill(e.target.checked)}
-                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px]">Question Patterns (one per line)</Label>
+                        <Textarea
+                          rows={3}
+                          value={editPatterns}
+                          onChange={(e) => setEditPatterns(e.target.value)}
                         />
-                        <label htmlFor={`editAutofill_${ans.id}`} className="text-xs text-slate-700">
-                          Allow Autofill without manual confirmation
-                        </label>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px]">Stored Answer</Label>
+                        <Textarea
+                          rows={3}
+                          value={editAnswer}
+                          onChange={(e) => setEditAnswer(e.target.value)}
+                        />
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={cancelEdit}
-                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 bg-white"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveEdit(ans.id)}
-                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
-                      >
-                        <Check className="h-3.5 w-3.5" /> Save Changes
-                      </button>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-2 gap-4 border-t border-border/60">
+                      <div className="flex items-center gap-4">
+                        <div className="space-y-1">
+                          <Label className="text-[11px]">Category</Label>
+                          <select
+                            value={editCategory}
+                            onChange={(e) => setEditCategory(e.target.value as StoredAnswerCategory)}
+                            className="h-8 rounded-md border border-input bg-background px-2.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+                          >
+                            <option value="eligibility">Eligibility</option>
+                            <option value="demographic">Demographic</option>
+                            <option value="motivation">Motivation</option>
+                            <option value="logistics">Logistics</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </div>
+
+                        <div className="flex items-center space-x-2 pt-4">
+                          <input
+                            type="checkbox"
+                            id={`editAutofill_${ans.id}`}
+                            checked={editAutoFill}
+                            onChange={(e) => setEditAutoFill(e.target.checked)}
+                            className="h-4 w-4 rounded border-input bg-background text-zinc-950 focus:ring-1 focus:ring-ring cursor-pointer"
+                          />
+                          <Label htmlFor={`editAutofill_${ans.id}`} className="cursor-pointer text-xs font-normal">
+                            Auto-fill without requiring manual review
+                          </Label>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={cancelEdit}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleSaveEdit(ans.id)}
+                          className="gap-1"
+                        >
+                          <Check className="h-3.5 w-3.5" /> Save Changes
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               );
             }
 
             return (
               <div
                 key={ans.id}
-                className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:border-slate-300 transition-colors flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                className="rounded-xl border border-border bg-card p-4 shadow-sm hover:border-zinc-400/60 transition-colors flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
               >
-                <div className="space-y-1.5 flex-1">
+                <div className="space-y-1.5 flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${categoryBadgeColor(ans.category)}`}>
+                    <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-wider font-normal">
                       {ans.category}
-                    </span>
+                    </Badge>
                     {ans.autoFill ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground">
                         <Sparkles className="h-3 w-3" /> AutoFill enabled
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                        Review before filling
+                      <span className="text-[11px] text-muted-foreground">
+                        Review before fill
                       </span>
                     )}
                   </div>
 
-                  <div className="text-xs text-slate-500 font-mono">
+                  <div className="text-xs text-muted-foreground font-mono truncate">
                     {ans.questionPatterns.join(' • ')}
                   </div>
 
-                  <div className="text-sm font-medium text-slate-900 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                    {ans.answer || <span className="text-slate-400 italic font-normal">No answer set</span>}
+                  <div className="text-xs text-foreground bg-muted/40 p-2.5 rounded-md border border-border font-mono whitespace-pre-wrap leading-relaxed">
+                    {ans.answer || <span className="text-muted-foreground italic font-normal">No answer set</span>}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-end md:self-center">
-                  <button
-                    type="button"
+                <div className="flex items-center gap-1.5 self-end md:self-center">
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => startEdit(ans)}
                     title="Edit question & answer"
-                    className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
                   >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => handleToggleAutoFill(ans)}
-                    title="Toggle autofill permission"
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-medium border ${
-                      ans.autoFill
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
-                    }`}
+                    className="h-8 text-xs font-normal"
                   >
-                    {ans.autoFill ? 'Disable Autofill' : 'Enable Autofill'}
-                  </button>
-                  <button
-                    type="button"
+                    {ans.autoFill ? 'Disable Auto' : 'Enable Auto'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => handleDelete(ans.id)}
-                    className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
             );

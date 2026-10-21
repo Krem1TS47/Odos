@@ -1,7 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { repository } from '../../core/storage/repository';
 import { exportProfileToYaml, exportAnswersToYaml } from '../../core/config/yamlExporter';
-import { Trash2, Download, Key, AlertTriangle, FileCode } from 'lucide-react';
+import { Trash2, Download, Key, AlertTriangle, FileCode, Check } from 'lucide-react';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
 
 interface Props {
   onDataReset: () => void;
@@ -86,100 +95,125 @@ export const SettingsView: React.FC<Props> = ({ onDataReset }) => {
   };
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-6 max-w-3xl">
       {/* LLM Key */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-2 mb-2">
-          <Key className="h-5 w-5 text-indigo-600" />
-          <h3 className="text-base font-semibold text-slate-900">Gemini API Key</h3>
-        </div>
-        <p className="text-xs text-slate-600 mb-4">
-          Odos uses your private Gemini API key solely for drafting plain text answers to unmatched open-ended questions. Your key is stored in <code>chrome.storage.local</code> and never synced or transmitted elsewhere.
-        </p>
-
-        <div className="flex gap-2">
-          <input
-            type="password"
-            placeholder="AIzaSy..."
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="flex-1 rounded-lg border border-slate-300 p-2 text-sm font-mono focus:border-indigo-500 focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={handleSaveKey}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-          >
-            {keySaved ? 'Saved!' : 'Save Key'}
-          </button>
-        </div>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Key className="h-4 w-4 text-foreground" /> Gemini API Key
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Odos uses your private Gemini API key solely for drafting plain text answers to unmatched open-ended questions. Your key is stored in <code className="font-mono text-foreground font-medium">chrome.storage.local</code> and never synced or transmitted elsewhere.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2">
+            <Input
+              type="password"
+              placeholder="AIzaSy..."
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              className="flex-1 font-mono text-xs"
+            />
+            <Button
+              type="button"
+              onClick={handleSaveKey}
+              size="sm"
+              className="gap-1.5"
+            >
+              {keySaved ? (
+                <>
+                  <Check className="h-3.5 w-3.5" /> Saved
+                </>
+              ) : (
+                'Save Key'
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Repo YAML Configuration */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-2 mb-2">
-          <FileCode className="h-5 w-5 text-indigo-600" />
-          <h3 className="text-base font-semibold text-slate-900">Repo YAML Configuration</h3>
-        </div>
-        <p className="text-xs text-slate-600 mb-4">
-          You can edit your profile, education, experience, and stored answers directly in <code>config/profile.yaml</code> and <code>config/answers.yaml</code> in your code editor.
-          Download updated YAML files below or reload the extension from the repository config.
-        </p>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <FileCode className="h-4 w-4 text-foreground" /> Repo YAML Configuration
+          </CardTitle>
+          <CardDescription className="text-xs">
+            You can edit your profile, education, experience, and stored answers directly in <code className="font-mono text-foreground font-medium">config/profile.yaml</code> and <code className="font-mono text-foreground font-medium">config/answers.yaml</code> in your code editor.
+            Download updated YAML files below or reload the extension from the repository config.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleExportProfileYaml}
+              className="gap-1.5 text-xs font-normal"
+            >
+              <Download className="h-3.5 w-3.5" /> Download profile.yaml
+            </Button>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={handleExportProfileYaml}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
-          >
-            <Download className="h-3.5 w-3.5 text-indigo-600" /> Download profile.yaml
-          </button>
-
-          <button
-            type="button"
-            onClick={handleExportAnswersYaml}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
-          >
-            <Download className="h-3.5 w-3.5 text-indigo-600" /> Download answers.yaml
-          </button>
-        </div>
-      </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleExportAnswersYaml}
+              className="gap-1.5 text-xs font-normal"
+            >
+              <Download className="h-3.5 w-3.5" /> Download answers.yaml
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Export Backup */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-2 mb-2">
-          <Download className="h-5 w-5 text-indigo-600" />
-          <h3 className="text-base font-semibold text-slate-900">Export Backup</h3>
-        </div>
-        <p className="text-xs text-slate-600 mb-4">
-          Download your complete local Odos database (applications, profiles, questions, and jobs) as a JSON file.
-        </p>
-        <button
-          type="button"
-          onClick={handleExportJson}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
-        >
-          <Download className="h-4 w-4" /> Export All Data (JSON)
-        </button>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Download className="h-4 w-4 text-foreground" /> Export Backup
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Download your complete local Odos database (applications, profiles, questions, and jobs) as a JSON file.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleExportJson}
+            className="gap-1.5 text-xs font-normal"
+          >
+            <Download className="h-3.5 w-3.5" /> Export All Data (JSON)
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Danger Zone: Wipe Data */}
-      <div className="rounded-xl border border-red-200 bg-red-50/50 p-6 shadow-sm">
-        <div className="flex items-center gap-2 mb-2 text-red-700">
-          <AlertTriangle className="h-5 w-5" />
-          <h3 className="text-base font-semibold">Danger Zone</h3>
-        </div>
-        <p className="text-xs text-red-600 mb-4">
-          Wiping your data will permanently purge all IndexedDB tables (profile, resumes, stored answers, jobs, and application history). This action cannot be undone.
-        </p>
-        <button
-          type="button"
-          onClick={handleWipeData}
-          className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 shadow-sm"
-        >
-          <Trash2 className="h-4 w-4" /> Wipe All Local Data
-        </button>
-      </div>
+      <Card className="border-destructive/30 bg-destructive/5">
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-4 w-4" /> Danger Zone
+          </CardTitle>
+          <CardDescription className="text-xs text-destructive/80">
+            Wiping your data will permanently purge all IndexedDB tables (profile, resumes, stored answers, jobs, and application history). This action cannot be undone.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={handleWipeData}
+            className="gap-1.5 text-xs font-medium"
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Wipe All Local Data
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 };

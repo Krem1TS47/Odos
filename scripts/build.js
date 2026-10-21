@@ -191,7 +191,9 @@ async function runBuild() {
     '@background': path.resolve(rootDir, 'extension/src/background'),
     '@dashboard': path.resolve(rootDir, 'extension/src/dashboard'),
     '@popup': path.resolve(rootDir, 'extension/src/popup'),
-    '@llm': path.resolve(rootDir, 'extension/src/llm')
+    '@llm': path.resolve(rootDir, 'extension/src/llm'),
+    '@ui': path.resolve(rootDir, 'extension/src/components/ui'),
+    '@lib': path.resolve(rootDir, 'extension/src/lib')
   };
 
   // Step 1: Build Pages & Background (ES Module)

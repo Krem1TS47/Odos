@@ -1,7 +1,18 @@
 import React, { useState } from 'react';
 import { parseFullYamlConfig } from '../../core/config';
 import { repository } from '../../core/storage/repository';
-import { Upload, AlertCircle, CheckCircle, X } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../components/ui/dialog';
+import { Button } from '../../components/ui/button';
+import { Textarea } from '../../components/ui/textarea';
+import { Label } from '../../components/ui/label';
 
 interface Props {
   isOpen: boolean;
@@ -13,8 +24,6 @@ export const YamlImportModal: React.FC<Props> = ({ isOpen, onClose, onSuccess })
   const [profileYaml, setProfileYaml] = useState('');
   const [answersYaml, setAnswersYaml] = useState('');
   const [status, setStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ type: 'idle' });
-
-  if (!isOpen) return null;
 
   const handleFileUpload = (type: 'profile' | 'answers', e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -61,90 +70,96 @@ export const YamlImportModal: React.FC<Props> = ({ isOpen, onClose, onSuccess })
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-2xl rounded-xl bg-white p-6 shadow-2xl">
-        <div className="flex items-center justify-between border-b pb-3">
-          <div className="flex items-center gap-2">
-            <Upload className="h-5 w-5 text-indigo-600" />
-            <h2 className="text-lg font-semibold text-slate-900">Import YAML Configuration</h2>
-          </div>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Upload className="h-4 w-4" /> Import YAML Configuration
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Upload or paste your <code className="font-mono text-foreground font-medium">profile.yaml</code> and <code className="font-mono text-foreground font-medium">answers.yaml</code> to import your personal info, work authorization, education, and answers.
+          </DialogDescription>
+        </DialogHeader>
 
-        <p className="mt-2 text-sm text-slate-600">
-          Upload or paste your <code>profile.yaml</code> and <code>answers.yaml</code> to import your personal info, work authorization, education, and answers.
-        </p>
-
-        <div className="mt-4 space-y-4">
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-sm font-medium text-slate-700">profile.yaml</label>
-              <label className="cursor-pointer text-xs font-semibold text-indigo-600 hover:underline">
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium">profile.yaml</Label>
+              <label className="cursor-pointer text-xs text-muted-foreground hover:text-foreground font-medium underline underline-offset-2">
                 Upload File
-                <input type="file" accept=".yaml,.yml" className="hidden" onChange={(e) => handleFileUpload('profile', e)} />
+                <input
+                  type="file"
+                  accept=".yaml,.yml"
+                  className="hidden"
+                  onChange={(e) => handleFileUpload('profile', e)}
+                />
               </label>
             </div>
-            <textarea
+            <Textarea
               rows={5}
               placeholder="Paste content of profile.yaml here..."
               value={profileYaml}
               onChange={(e) => setProfileYaml(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 font-mono text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="font-mono text-xs"
             />
           </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-sm font-medium text-slate-700">answers.yaml</label>
-              <label className="cursor-pointer text-xs font-semibold text-indigo-600 hover:underline">
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium">answers.yaml</Label>
+              <label className="cursor-pointer text-xs text-muted-foreground hover:text-foreground font-medium underline underline-offset-2">
                 Upload File
-                <input type="file" accept=".yaml,.yml" className="hidden" onChange={(e) => handleFileUpload('answers', e)} />
+                <input
+                  type="file"
+                  accept=".yaml,.yml"
+                  className="hidden"
+                  onChange={(e) => handleFileUpload('answers', e)}
+                />
               </label>
             </div>
-            <textarea
+            <Textarea
               rows={4}
               placeholder="Paste content of answers.yaml here..."
               value={answersYaml}
               onChange={(e) => setAnswersYaml(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 font-mono text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="font-mono text-xs"
             />
           </div>
         </div>
 
         {status.type === 'error' && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-            <AlertCircle className="h-5 w-5 flex-shrink-0" />
+          <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
             <span>{status.message}</span>
           </div>
         )}
 
         {status.type === 'success' && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-700">
-            <CheckCircle className="h-5 w-5 flex-shrink-0" />
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted p-3 text-xs text-foreground">
+            <CheckCircle className="h-4 w-4 flex-shrink-0" />
             <span>{status.message}</span>
           </div>
         )}
 
-        <div className="mt-6 flex justify-end gap-3">
-          <button
+        <DialogFooter>
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={onClose}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            size="sm"
             disabled={status.type === 'loading'}
             onClick={handleImport}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
           >
             {status.type === 'loading' ? 'Importing...' : 'Import Data'}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };

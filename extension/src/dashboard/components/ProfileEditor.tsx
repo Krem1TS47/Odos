@@ -2,6 +2,12 @@ import React, { useState } from 'react';
 import { Profile } from '../../core/models';
 import { repository } from '../../core/storage/repository';
 import { Plus, Trash2, FileText, Check } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
+import { Badge } from '../../components/ui/badge';
+import { Separator } from '../../components/ui/separator';
 
 interface Props {
   profile: Profile;
@@ -35,7 +41,7 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
   const handleSave = async () => {
     try {
       await repository.saveProfile(formData);
-      setSaveStatus('Profile saved successfully!');
+      setSaveStatus('Profile saved successfully');
       setTimeout(() => setSaveStatus(null), 2500);
       onUpdate();
     } catch (err: any) {
@@ -119,96 +125,103 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Contact Section */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="text-base font-semibold text-slate-900 mb-4">Contact Information</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">First Name</label>
-            <input
-              type="text"
-              value={formData.contact.firstName}
-              onChange={(e) => handleContactChange('firstName', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
+      <Card className="border-border bg-card shadow-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-semibold">Contact Information</CardTitle>
+          <CardDescription>Primary personal and contact details used across ATS adapters.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="first-name">First Name</Label>
+              <Input
+                id="first-name"
+                type="text"
+                value={formData.contact.firstName}
+                onChange={(e) => handleContactChange('firstName', e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="last-name">Last Name</Label>
+              <Input
+                id="last-name"
+                type="text"
+                value={formData.contact.lastName}
+                onChange={(e) => handleContactChange('lastName', e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="email">Email Address</Label>
+              <Input
+                id="email"
+                type="email"
+                value={formData.contact.email}
+                onChange={(e) => handleContactChange('email', e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="phone">Phone Number</Label>
+              <Input
+                id="phone"
+                type="tel"
+                value={formData.contact.phone}
+                onChange={(e) => handleContactChange('phone', e.target.value)}
+              />
+            </div>
+            <div className="md:col-span-2 space-y-1.5">
+              <Label htmlFor="location">Location (City, State, Country)</Label>
+              <Input
+                id="location"
+                type="text"
+                value={formData.contact.location}
+                onChange={(e) => handleContactChange('location', e.target.value)}
+                placeholder="e.g. San Francisco, CA, United States"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="linkedin">LinkedIn URL</Label>
+              <Input
+                id="linkedin"
+                type="url"
+                value={formData.contact.linkedin}
+                onChange={(e) => handleContactChange('linkedin', e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="github">GitHub URL</Label>
+              <Input
+                id="github"
+                type="url"
+                value={formData.contact.github}
+                onChange={(e) => handleContactChange('github', e.target.value)}
+              />
+            </div>
+            <div className="md:col-span-2 space-y-1.5">
+              <Label htmlFor="website">Website / Portfolio URL</Label>
+              <Input
+                id="website"
+                type="url"
+                value={formData.contact.website}
+                onChange={(e) => handleContactChange('website', e.target.value)}
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Last Name</label>
-            <input
-              type="text"
-              value={formData.contact.lastName}
-              onChange={(e) => handleContactChange('lastName', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
-            <input
-              type="email"
-              value={formData.contact.email}
-              onChange={(e) => handleContactChange('email', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Phone</label>
-            <input
-              type="tel"
-              value={formData.contact.phone}
-              onChange={(e) => handleContactChange('phone', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">Location (City, State, Country)</label>
-            <input
-              type="text"
-              value={formData.contact.location}
-              onChange={(e) => handleContactChange('location', e.target.value)}
-              placeholder="e.g. San Francisco, California, United States"
-              className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">LinkedIn Profile</label>
-            <input
-              type="url"
-              value={formData.contact.linkedin}
-              onChange={(e) => handleContactChange('linkedin', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">GitHub Profile</label>
-            <input
-              type="url"
-              value={formData.contact.github}
-              onChange={(e) => handleContactChange('github', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">Website / Portfolio</label>
-            <input
-              type="url"
-              value={formData.contact.website}
-              onChange={(e) => handleContactChange('website', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Work Authorization */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="text-base font-semibold text-slate-900 mb-4">Work Authorization</h3>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              Authorized Countries (comma-separated)
-            </label>
-            <input
+      <Card className="border-border bg-card shadow-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-semibold">Work Authorization</CardTitle>
+          <CardDescription>Legal eligibility and visa sponsorship preferences.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="auth-countries">Authorized Countries (comma-separated)</Label>
+            <Input
+              id="auth-countries"
               type="text"
               value={formData.workAuthorization.authorizedCountries.join(', ')}
               onChange={(e) =>
@@ -218,105 +231,115 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
                 )
               }
               placeholder="e.g. United States, Canada"
-              className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-indigo-500 focus:outline-none"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center space-x-2 pt-1">
             <input
               type="checkbox"
               id="sponsorship"
               checked={formData.workAuthorization.requiresSponsorship}
               onChange={(e) => handleWorkAuthChange('requiresSponsorship', e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              className="h-4 w-4 rounded border-input bg-background text-zinc-950 focus:ring-1 focus:ring-ring cursor-pointer"
             />
-            <label htmlFor="sponsorship" className="text-sm text-slate-700">
+            <Label htmlFor="sponsorship" className="cursor-pointer font-normal">
               I require current or future visa sponsorship
-            </label>
+            </Label>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Resumes */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-slate-900">Resumes</h3>
-          <label className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100">
-            <Plus className="h-3.5 w-3.5" />
-            Upload PDF
+      <Card className="border-border bg-card shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between pb-4">
+          <div>
+            <CardTitle className="text-base font-semibold">Resumes</CardTitle>
+            <CardDescription>PDF resumes stored in IndexedDB for autofill attachment.</CardDescription>
+          </div>
+          <label className="cursor-pointer">
+            <Button variant="outline" size="sm" asChild className="gap-1.5 cursor-pointer">
+              <span>
+                <Plus className="h-3.5 w-3.5" /> Upload PDF
+              </span>
+            </Button>
             <input type="file" accept=".pdf" className="hidden" onChange={handleResumeUpload} />
           </label>
-        </div>
-
-        {profile.resumes.length === 0 ? (
-          <p className="text-sm text-slate-500 italic">No resumes uploaded yet.</p>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {profile.resumes.map((r) => (
-              <div key={r.id} className="flex items-center justify-between py-3">
-                <div className="flex items-center gap-3">
-                  <FileText className="h-5 w-5 text-indigo-500" />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-slate-900">{r.label}</span>
-                      {r.isDefault && (
-                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
-                          Default
-                        </span>
-                      )}
+        </CardHeader>
+        <CardContent>
+          {profile.resumes.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No resumes uploaded yet.</p>
+          ) : (
+            <div className="divide-y divide-border/60">
+              {profile.resumes.map((r) => (
+                <div key={r.id} className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-foreground">{r.label}</span>
+                        {r.isDefault && (
+                          <Badge variant="default" className="text-[9px] py-0 px-1.5 font-mono">
+                            Default
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-muted-foreground font-mono">
+                        {r.fileName} • {(r.fileSize / 1024).toFixed(1)} KB
+                      </span>
                     </div>
-                    <span className="text-xs text-slate-500">{r.fileName} ({(r.fileSize / 1024).toFixed(1)} KB)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {!r.isDefault && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleSetDefaultResume(r.id)}
+                        className="h-7 text-xs font-normal text-muted-foreground"
+                      >
+                        Set Default
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteResume(r.id)}
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {!r.isDefault && (
-                    <button
-                      type="button"
-                      onClick={() => handleSetDefaultResume(r.id)}
-                      className="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                    >
-                      Make Default
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteResume(r.id)}
-                    className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Education */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-slate-900">Education</h3>
-          <button
-            type="button"
-            onClick={addEducation}
-            className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
-          >
+      <Card className="border-border bg-card shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between pb-4">
+          <div>
+            <CardTitle className="text-base font-semibold">Education</CardTitle>
+            <CardDescription>Degrees, schools, and academic background.</CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={addEducation} className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> Add School
-          </button>
-        </div>
-        <div className="space-y-4">
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
           {formData.education.map((edu, idx) => (
-            <div key={edu.id} className="rounded-lg border border-slate-100 bg-slate-50/50 p-4 relative">
-              <button
-                type="button"
+            <div key={edu.id} className="rounded-lg border border-border bg-muted/30 p-3.5 relative">
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => removeEducation(edu.id)}
-                className="absolute right-3 top-3 text-slate-400 hover:text-red-600"
+                className="absolute right-2 top-2 h-6 w-6 text-muted-foreground hover:text-destructive"
               >
-                <Trash2 className="h-4 w-4" />
-              </button>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">School</label>
-                  <input
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pr-8">
+                <div className="space-y-1">
+                  <Label className="text-[11px]">School / University</Label>
+                  <Input
                     type="text"
                     value={edu.school}
                     onChange={(e) => {
@@ -324,12 +347,12 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
                       updated[idx].school = e.target.value;
                       setFormData({ ...formData, education: updated });
                     }}
-                    className="w-full rounded border border-slate-300 p-1.5 text-xs focus:outline-none"
+                    className="h-8 text-xs"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Degree</label>
-                  <input
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Degree</Label>
+                  <Input
                     type="text"
                     value={edu.degree}
                     onChange={(e) => {
@@ -337,12 +360,12 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
                       updated[idx].degree = e.target.value;
                       setFormData({ ...formData, education: updated });
                     }}
-                    className="w-full rounded border border-slate-300 p-1.5 text-xs focus:outline-none"
+                    className="h-8 text-xs"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Field of Study</label>
-                  <input
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Field of Study</Label>
+                  <Input
                     type="text"
                     value={edu.field}
                     onChange={(e) => {
@@ -350,41 +373,41 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
                       updated[idx].field = e.target.value;
                       setFormData({ ...formData, education: updated });
                     }}
-                    className="w-full rounded border border-slate-300 p-1.5 text-xs focus:outline-none"
+                    className="h-8 text-xs"
                   />
                 </div>
               </div>
             </div>
           ))}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Experience */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-slate-900">Experience</h3>
-          <button
-            type="button"
-            onClick={addExperience}
-            className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
-          >
+      <Card className="border-border bg-card shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between pb-4">
+          <div>
+            <CardTitle className="text-base font-semibold">Experience</CardTitle>
+            <CardDescription>Professional roles and employment history.</CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={addExperience} className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> Add Experience
-          </button>
-        </div>
-        <div className="space-y-4">
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
           {formData.experience.map((exp, idx) => (
-            <div key={exp.id} className="rounded-lg border border-slate-100 bg-slate-50/50 p-4 relative">
-              <button
-                type="button"
+            <div key={exp.id} className="rounded-lg border border-border bg-muted/30 p-3.5 relative">
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => removeExperience(exp.id)}
-                className="absolute right-3 top-3 text-slate-400 hover:text-red-600"
+                className="absolute right-2 top-2 h-6 w-6 text-muted-foreground hover:text-destructive"
               >
-                <Trash2 className="h-4 w-4" />
-              </button>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Company</label>
-                  <input
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pr-8">
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Company</Label>
+                  <Input
                     type="text"
                     value={exp.company}
                     onChange={(e) => {
@@ -392,12 +415,12 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
                       updated[idx].company = e.target.value;
                       setFormData({ ...formData, experience: updated });
                     }}
-                    className="w-full rounded border border-slate-300 p-1.5 text-xs focus:outline-none"
+                    className="h-8 text-xs"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Title</label>
-                  <input
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Title</Label>
+                  <Input
                     type="text"
                     value={exp.title}
                     onChange={(e) => {
@@ -405,29 +428,25 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
                       updated[idx].title = e.target.value;
                       setFormData({ ...formData, experience: updated });
                     }}
-                    className="w-full rounded border border-slate-300 p-1.5 text-xs focus:outline-none"
+                    className="h-8 text-xs"
                   />
                 </div>
               </div>
             </div>
           ))}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
-      {/* Save Button */}
-      <div className="flex items-center justify-between pt-4">
+      {/* Save Bottom Bar */}
+      <div className="flex items-center justify-between pt-2">
         {saveStatus ? (
-          <div className="flex items-center gap-2 text-sm text-green-700">
-            <Check className="h-4 w-4" /> {saveStatus}
+          <div className="flex items-center gap-1.5 text-xs text-foreground bg-muted border border-border px-2.5 py-1 rounded-md">
+            <Check className="h-3.5 w-3.5" /> {saveStatus}
           </div>
         ) : <div />}
-        <button
-          type="button"
-          onClick={handleSave}
-          className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
-        >
+        <Button onClick={handleSave} className="px-5 font-medium">
           Save Changes
-        </button>
+        </Button>
       </div>
     </div>
   );
