@@ -235,7 +235,9 @@ describe('Dynamic Repeatable Additions Manager', () => {
           school: 'MIT',
           degree: 'BS',
           field: 'CS',
-          startDate: '2020'
+          startDate: '2020',
+          endDate: '2024',
+          gpa: '3.9'
         }
       ],
       contact: {

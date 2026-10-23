@@ -7,7 +7,8 @@ import {
   fillSelectElement,
   fillRadioOrCheckbox,
   fillComboboxWidget,
-  fillFileInput
+  fillFileInput,
+  reconcileField
 } from '../core/filler';
 import { processDynamicAdditions } from '../core/repeatableManager';
 
@@ -278,6 +279,16 @@ export async function executeAutofill(
     } catch (err) {
       console.warn(`[Odos] Error setting field ${field.label}:`, err);
       emptyFields.push(field);
+    }
+  }
+
+  // Post-Fill Verification & State Reconciliation (Simplify & JobRight Architecture)
+  // Give frameworks (React fiber, controlled component re-renders) 50ms to settle,
+  // then check if any input was wiped back to empty. If so, reconcile immediately.
+  await new Promise((r) => setTimeout(r, 50));
+  for (const f of filledFields) {
+    if (f.type !== 'file' && f.matchedValue && (f.element instanceof HTMLInputElement || f.element instanceof HTMLTextAreaElement)) {
+      reconcileField(f.element, f.matchedValue);
     }
   }
 

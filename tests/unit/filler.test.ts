@@ -3,7 +3,8 @@ import {
   setNativeValue,
   fillSelectElement,
   fillRadioOrCheckbox,
-  fillFileInput
+  fillFileInput,
+  reconcileField
 } from '../../extension/src/core/filler';
 import { deepQuerySelector, deepQuerySelectorAll } from '../../extension/src/core/dom';
 
@@ -50,6 +51,59 @@ describe('Filler and DOM Piercing (Step 4)', () => {
 
       expect(() => setNativeValue(btn, 'test')).toThrowError(/SUBMIT GUARD VIOLATION/);
       document.body.removeChild(btn);
+    });
+
+    it('synchronizes React _valueTracker so React onChange triggers reliably', () => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      document.body.appendChild(input);
+
+      // Simulate React 16-19 _valueTracker
+      let trackedVal = '';
+      (input as any)._valueTracker = {
+        getValue: () => trackedVal,
+        setValue: (v: string) => { trackedVal = v; }
+      };
+
+      let reactStateUpdated = false;
+      input.addEventListener('input', () => {
+        // React's internal check:
+        const tracker = (input as any)._valueTracker;
+        const lastValue = tracker ? tracker.getValue() : null;
+        if (input.value !== lastValue) {
+          tracker.setValue(input.value);
+          reactStateUpdated = true;
+        }
+      });
+
+      setNativeValue(input, 'Grace Hopper');
+
+      expect(input.value).toBe('Grace Hopper');
+      expect(reactStateUpdated).toBe(true);
+      document.body.removeChild(input);
+    });
+
+    it('reconciles field if controlled component wiped value during re-render', () => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = ''; // Framework wiped it back
+      document.body.appendChild(input);
+
+      const restored = reconcileField(input, 'Alan Turing');
+      expect(restored).toBe(true);
+      expect(input.value).toBe('Alan Turing');
+      document.body.removeChild(input);
+    });
+
+    it('fills contenteditable elements', () => {
+      const div = document.createElement('div');
+      div.setAttribute('contenteditable', 'true');
+      document.body.appendChild(div);
+
+      const success = setNativeValue(div, 'Cover letter text in rich editor');
+      expect(success).toBe(true);
+      expect(div.textContent).toBe('Cover letter text in rich editor');
+      document.body.removeChild(div);
     });
   });
 

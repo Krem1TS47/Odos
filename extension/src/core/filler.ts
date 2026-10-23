@@ -13,32 +13,177 @@ export interface FillReportItem {
 }
 
 /**
- * Sets a form field value safely via prototype property descriptor override.
- * React, Vue, and modern frameworks listen to value changes via setters.
- * Dispatches standard focus, input, change, and blur events.
+ * Injects a value into an input, textarea, or contenteditable element using
+ * the 4-tier injection architecture proven in production job autofill extensions
+ * (Simplify, JobRight):
+ * 
+ * Tier 1: Focus & pre-input lifecycle (focus, focusin, keydown, beforeinput)
+ * Tier 2: Native user typing simulation via document.execCommand('insertText')
+ * Tier 3: React _valueTracker reset & native prototype descriptor setter
+ * Tier 4: Synthetic event notification (InputEvent, input, change, keyup, blur, focusout)
+ * Tier 5: Post-fill verification & state reconciliation
  */
 export function setNativeValue(
-  el: HTMLInputElement | HTMLTextAreaElement,
+  el: HTMLElement,
   value: string
-): void {
+): boolean {
   assertNotSubmitControl(el, 'setNativeValue');
 
-  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-
-  if (typeof el.focus === 'function') {
-    el.focus();
+  // Handle contenteditable elements (Rich text / modern div editors)
+  if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
+    return fillContentEditable(el, value);
   }
 
-  if (descriptor && descriptor.set) {
-    descriptor.set.call(el, value);
-  } else {
-    el.value = value;
+  const inputEl = el as HTMLInputElement | HTMLTextAreaElement;
+  const isInput = inputEl instanceof HTMLInputElement || inputEl instanceof HTMLTextAreaElement;
+  if (!isInput || inputEl.type === 'file') return false;
+
+  // 1. Pre-Interaction: Focus & activate field (triggers floating labels & active state)
+  try {
+    if (typeof inputEl.focus === 'function') {
+      inputEl.focus();
+    }
+  } catch {}
+  inputEl.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+  inputEl.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  inputEl.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Unidentified' }));
+
+  const oldValue = inputEl.value || '';
+  let commandSucceeded = false;
+
+  // 2. Tier 1: Simulate Native User Typing via execCommand('insertText')
+  // This bypasses React's synthetic filter because the browser treats it as physical user keystrokes.
+  try {
+    if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
+      try {
+        if (typeof inputEl.select === 'function') {
+          inputEl.select();
+        } else if (typeof inputEl.setSelectionRange === 'function' && inputEl.type !== 'email' && inputEl.type !== 'number') {
+          inputEl.setSelectionRange(0, inputEl.value.length);
+        }
+      } catch {}
+
+      commandSucceeded = document.execCommand('insertText', false, value);
+    }
+  } catch {}
+
+  // 3. Tier 2: If execCommand failed or did not match the expected value (e.g. in JSDOM or restricted environments),
+  // fallback to React _valueTracker reset + native prototype setter
+  if (!commandSucceeded || inputEl.value !== value) {
+    try {
+      inputEl.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: value }));
+    } catch {
+      inputEl.dispatchEvent(new Event('beforeinput', { bubbles: true, cancelable: true }));
+    }
+
+    // Reset React's internal _valueTracker to force React's updateValueIfChanged to detect a diff
+    const tracker = (inputEl as any)._valueTracker;
+    if (tracker && typeof tracker.setValue === 'function') {
+      tracker.setValue(oldValue === value ? '' : oldValue);
+    }
+
+    // Call the original prototype setter (bypassing React's wrapper on the element instance)
+    const proto = inputEl instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(inputEl, value);
+    } else {
+      inputEl.value = value;
+    }
+
+    // Ensure tracker knows the previous value so React's input event handler sees lastValue !== nextValue
+    if (tracker && typeof tracker.setValue === 'function') {
+      tracker.setValue(oldValue === value ? '' : oldValue);
+    }
+
+    try {
+      inputEl.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: value }));
+    } catch {
+      inputEl.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    }
+  }
+
+  // 4. Form Validation & Change Lifecycle (Crucial for React Hook Form, Formik, Yup)
+  inputEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+  inputEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' }));
+
+  let blurred = false;
+  try {
+    if (typeof inputEl.blur === 'function') {
+      inputEl.blur();
+      blurred = true;
+    }
+  } catch {}
+
+  if (!blurred) {
+    inputEl.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+  }
+  inputEl.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+
+  return inputEl.value === value;
+}
+
+/**
+ * Handles contenteditable elements (used in Ashby and modern rich-text question fields).
+ */
+export function fillContentEditable(el: HTMLElement, value: string): boolean {
+  assertNotSubmitControl(el, 'fillContentEditable');
+
+  try {
+    el.focus();
+  } catch {}
+  el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+
+  let success = false;
+  try {
+    if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
+      document.execCommand('selectAll', false);
+      success = document.execCommand('insertText', false, value);
+    }
+  } catch {}
+
+  if (!success || el.textContent !== value) {
+    el.textContent = value;
   }
 
   el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
   el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-  el.dispatchEvent(new Event('blur', { bubbles: true, cancelable: true }));
+  el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+  try {
+    el.blur();
+  } catch {}
+
+  return true;
+}
+
+/**
+ * Verifies that a field retained its filled value and reconciles it if a framework
+ * reset occurred during component re-rendering.
+ */
+export function reconcileField(el: HTMLElement, expectedValue: string): boolean {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    if (el.type === 'file') return true;
+    if (el.value !== expectedValue) {
+      const tracker = (el as any)._valueTracker;
+      if (tracker && typeof tracker.setValue === 'function') {
+        tracker.setValue('');
+      }
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (descriptor && descriptor.set) {
+        descriptor.set.call(el, expectedValue);
+      } else {
+        el.value = expectedValue;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+      return el.value === expectedValue;
+    }
+    return true;
+  }
+  return true;
 }
 
 /**
@@ -141,19 +286,7 @@ export async function fillComboboxWidget(
       );
 
   if (searchInput) {
-    const proto = HTMLInputElement.prototype;
-    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-    if (descriptor && descriptor.set) {
-      descriptor.set.call(searchInput, desiredValue);
-    } else {
-      searchInput.value = desiredValue;
-    }
-    try {
-      searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: desiredValue }));
-    } catch {
-      searchInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-    }
-    searchInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    setNativeValue(searchInput, desiredValue);
     searchInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowDown', code: 'ArrowDown' }));
   }
 
