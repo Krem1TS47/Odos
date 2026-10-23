@@ -75,13 +75,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             return;
           }
 
+          // Convert ArrayBuffer to Base64 string for safe Chrome MV3 IPC messaging
+          const bytes = new Uint8Array(bufferRecord.data);
+          let binary = '';
+          const len = bytes.byteLength;
+          for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = btoa(binary);
+
           sendResponse({
             success: true,
             data: {
               id: bufferRecord.id,
               fileName: bufferRecord.fileName,
               fileType: bufferRecord.fileType,
-              data: bufferRecord.data
+              base64Data: base64
             }
           });
           break;

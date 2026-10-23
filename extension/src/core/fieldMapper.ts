@@ -185,13 +185,22 @@ export function mapElementToCanonical(
   if (id === 'phone-number' || name === 'phone-number') {
     return { canonical: 'phone', confidence: 0.95, source: 'known_id', reason: 'workday:phone-number' };
   }
-  if (id === 'addresssection_addressline1') {
+  if (id === 'phone-device-type' || name === 'phone-device-type') {
+    return { canonical: 'phone_device_type', confidence: 0.95, source: 'known_id', reason: 'workday:phone-device-type' };
+  }
+  if (id === 'addresssection_addressline1' || name === 'addresssection_addressline1') {
     return { canonical: 'address_line1', confidence: 0.95, source: 'known_id', reason: 'workday:addressSection_addressLine1' };
   }
-  if (id === 'addresssection_city') {
+  if (id === 'addresssection_city' || name === 'addresssection_city') {
     return { canonical: 'city', confidence: 0.95, source: 'known_id', reason: 'workday:addressSection_city' };
   }
-  if (id === 'addresssection_postalcode') {
+  if (id === 'addresssection_country' || name === 'addresssection_country') {
+    return { canonical: 'country', confidence: 0.95, source: 'known_id', reason: 'workday:addressSection_country' };
+  }
+  if (id === 'addresssection_countryregion' || name === 'addresssection_countryregion') {
+    return { canonical: 'state', confidence: 0.95, source: 'known_id', reason: 'workday:addressSection_countryRegion' };
+  }
+  if (id === 'addresssection_postalcode' || name === 'addresssection_postalcode') {
     return { canonical: 'postal_code', confidence: 0.95, source: 'known_id', reason: 'workday:addressSection_postalCode' };
   }
 

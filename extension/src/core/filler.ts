@@ -116,32 +116,48 @@ export async function fillComboboxWidget(
 
   const normDesired = desiredValue.toLowerCase().trim();
 
-  // 1. Focus combobox
+  // 1. Focus combobox and trigger popup
   if (typeof comboboxEl.focus === 'function') {
     comboboxEl.focus();
   }
+  comboboxEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+  comboboxEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
   comboboxEl.click();
 
-  // 2. If it's an input or has an embedded search input, type search text
+  // 2. If it's an input or has an embedded search input, type search text without blur
   const searchInput = comboboxEl instanceof HTMLInputElement
     ? comboboxEl
     : comboboxEl.querySelector<HTMLInputElement>('input[type="text"], input[role="searchbox"], input[aria-autocomplete]');
 
   if (searchInput) {
-    setNativeValue(searchInput, desiredValue);
+    const proto = HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(searchInput, desiredValue);
+    } else {
+      searchInput.value = desiredValue;
+    }
+    searchInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    searchInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
   }
 
-  // 3. Wait for options list to populate
-  await waitForElement('[role="option"], li[data-value], .option', 2000, searchContainer);
+  // 3. Wait for options list to populate (search both searchContainer and document)
+  const optionSelector = '[role="option"], li[data-value], .option, [data-automation-id="promptOption"], [data-automation-id="select-item"]';
+  await waitForElement(optionSelector, 2000, searchContainer);
 
-  const options = Array.from(searchContainer.querySelectorAll<HTMLElement>('[role="option"], li[data-value], .option'));
+  const doc = searchContainer instanceof Document ? searchContainer : searchContainer.ownerDocument || document;
+  const options = Array.from(doc.querySelectorAll<HTMLElement>(optionSelector));
+
   const matchingOption = options.find((opt) => {
     const text = (opt.textContent || '').toLowerCase().trim();
     const val = (opt.getAttribute('data-value') || '').toLowerCase().trim();
-    return text === normDesired || val === normDesired || text.includes(normDesired);
+    return text === normDesired || val === normDesired || text.includes(normDesired) || normDesired.includes(text);
   });
 
   if (matchingOption) {
+    // Workday Canvas Kit requires mousedown/mouseup to commit item in React state before click
+    matchingOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    matchingOption.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
     matchingOption.click();
     return true;
   }
@@ -195,13 +211,16 @@ export function fillFileInput(
       const dropZone = fileInput.closest('.drop-zone, .file-upload, [role="button"]') || fileInput.parentElement;
       if (dropZone) {
         try {
-          const dt = typeof DataTransfer !== 'undefined' ? new DataTransfer() : undefined;
-          const dropEvent = new DragEvent('drop', {
-            bubbles: true,
-            cancelable: true,
-            dataTransfer: dt
-          });
-          dropZone.dispatchEvent(dropEvent);
+          if (typeof DataTransfer !== 'undefined') {
+            const dropDt = new DataTransfer();
+            dropDt.items.add(file);
+            const dropEvent = new DragEvent('drop', {
+              bubbles: true,
+              cancelable: true,
+              dataTransfer: dropDt
+            });
+            dropZone.dispatchEvent(dropEvent);
+          }
         } catch {
           // Fallback if DragEvent initialization differs
         }

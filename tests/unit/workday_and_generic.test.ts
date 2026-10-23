@@ -95,6 +95,52 @@ describe('Workday and Generic Adapters (Step 9 & 10)', () => {
       expect(lName.value).toBe('Hamilton');
       expect(email.value).toBe('margaret@apollo.nasa.gov');
     });
+
+    it('discovers and autofills Workday custom combobox listboxes (Phone Device Type, Country, State)', async () => {
+      document.body.innerHTML = `
+        <div data-automation-id="form-page">
+          <div data-automation-id="phone-device-type">
+            <label id="phone-device-label">Phone Device Type*</label>
+            <button type="button" aria-haspopup="listbox" aria-labelledby="phone-device-label" id="btn-device-type">Select one</button>
+          </div>
+          <div data-automation-id="addressSection_country">
+            <label id="country-label">Country*</label>
+            <button type="button" aria-haspopup="listbox" aria-labelledby="country-label" id="btn-country">Select one</button>
+          </div>
+          <div data-automation-id="addressSection_countryRegion">
+            <label id="region-label">State*</label>
+            <button type="button" aria-haspopup="listbox" aria-labelledby="region-label" id="btn-state">Select one</button>
+          </div>
+        </div>
+        <div id="popup-container">
+          <ul role="listbox">
+            <li role="option" data-automation-id="promptOption">Mobile</li>
+            <li role="option" data-automation-id="promptOption">Landline</li>
+            <li role="option" data-automation-id="promptOption">United States</li>
+            <li role="option" data-automation-id="promptOption">California</li>
+          </ul>
+        </div>
+      `;
+
+      const fields = adapter.discoverFields(document);
+      expect(fields.length).toBe(3);
+      expect(fields[0].type).toBe('combobox');
+      expect(fields[0].label).toBe('Phone Device Type');
+      expect(fields[1].label).toBe('Country');
+      expect(fields[2].label).toBe('State');
+
+      const profile: Profile = {
+        ...DEFAULT_PROFILE,
+        contact: {
+          ...DEFAULT_PROFILE.contact,
+          location: 'San Jose, California, United States'
+        }
+      };
+
+      const result = await executeAutofill(fields, { profile, answers: [] });
+      expect(result.filledFields.length).toBe(3);
+      expect(result.filledFields.map(f => f.matchedValue)).toEqual(['Mobile', 'United States', 'California']);
+    });
   });
 
   describe('Generic Heuristic Fallback Adapter', () => {

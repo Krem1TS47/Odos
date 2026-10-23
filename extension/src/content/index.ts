@@ -76,7 +76,19 @@ export async function handleRunOdos(): Promise<string> {
       type: 'GET_RESUME_BINARY',
       resumeId: defaultResume.id
     });
-    if (binResp?.success && binResp.data?.data) {
+    if (binResp?.success && binResp.data?.base64Data) {
+      const binaryString = atob(binResp.data.base64Data);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      resumeFile = {
+        fileName: binResp.data.fileName,
+        fileType: binResp.data.fileType,
+        data: bytes.buffer
+      };
+    } else if (binResp?.success && binResp.data?.data) {
       resumeFile = {
         fileName: binResp.data.fileName,
         fileType: binResp.data.fileType,

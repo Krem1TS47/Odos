@@ -108,16 +108,17 @@ export class WorkdayAdapter implements AtsAdapter {
     if (!form) return [];
 
     const elements = form.querySelectorAll<HTMLElement>(
-      'input, select, textarea, [role="combobox"], [data-automation-id]'
+      'input, select, textarea, [role="combobox"], [aria-haspopup="listbox"], [data-automation-id]'
     );
 
     const fields: FormField[] = [];
     const seenElements = new Set<HTMLElement>();
 
     elements.forEach((el, index) => {
-      // Only inspect interactive input/select/textarea controls
+      // Only inspect interactive input/select/textarea controls or combobox/listbox triggers
       const tag = el.tagName.toUpperCase();
-      const isInput = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || el.getAttribute('role') === 'combobox';
+      const isCombobox = el.getAttribute('role') === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox';
+      const isInput = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || isCombobox;
       if (!isInput) return;
 
       if (seenElements.has(el)) return;
@@ -127,17 +128,35 @@ export class WorkdayAdapter implements AtsAdapter {
 
       // Invariant 1: Strictly ignore submit or navigation controls
       if (inputEl.type === 'hidden' || isSubmitControl(el)) return;
-      if (tag === 'BUTTON' && el.getAttribute('role') !== 'combobox') return;
+      if (tag === 'BUTTON' && !isCombobox) return;
 
-      const autoId = el.getAttribute('data-automation-id') || '';
+      // Extract automation ID, falling back to parent container with data-automation-id
+      const directAutoId = el.getAttribute('data-automation-id') || '';
+      const parentAutoId = el.closest('[data-automation-id]:not([data-automation-id="form-page"])')?.getAttribute('data-automation-id') || '';
+      const autoId = (directAutoId && directAutoId !== 'dropdownWidget' && directAutoId !== 'select-button')
+        ? directAutoId
+        : (parentAutoId || directAutoId);
+
       const name = el.getAttribute('name') || autoId;
       const id = el.getAttribute('id') || autoId || `wd_field_${index}`;
 
       // Extract label
       let labelText = '';
 
+      // 0. aria-labelledby (Standard for Workday Canvas Kit comboboxes and buttons)
+      const labelledBy = el.getAttribute('aria-labelledby');
+      if (labelledBy) {
+        const ids = labelledBy.split(/\s+/).filter(Boolean);
+        const textParts = ids
+          .map((lblId) => doc.getElementById(lblId)?.textContent?.trim())
+          .filter(Boolean);
+        if (textParts.length > 0) {
+          labelText = textParts.join(' ');
+        }
+      }
+
       // 1. label[for="id"]
-      if (id && !id.startsWith('wd_field_')) {
+      if (!labelText && id && !id.startsWith('wd_field_')) {
         const labelEl = doc.querySelector(`label[for="${escapeCss(id)}"]`);
         if (labelEl?.textContent) {
           labelText = labelEl.textContent;
@@ -165,15 +184,20 @@ export class WorkdayAdapter implements AtsAdapter {
         labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
       }
 
-      // Friendly names for common Workday automation IDs
-      if (!labelText) {
+      // 5. Friendly names for common Workday automation IDs
+      const normAutoId = autoId.toLowerCase();
+      if (!labelText || labelText.toLowerCase() === 'select one' || labelText.toLowerCase() === 'select') {
         if (autoId === 'legalNameSection_firstName') labelText = 'First Name';
         else if (autoId === 'legalNameSection_lastName') labelText = 'Last Name';
         else if (autoId === 'email') labelText = 'Email Address';
         else if (autoId === 'phone-number') labelText = 'Phone Number';
+        else if (normAutoId.includes('phone-device-type')) labelText = 'Phone Device Type';
+        else if (normAutoId.includes('countryregion') || normAutoId.includes('state')) labelText = 'State';
+        else if (normAutoId.includes('country')) labelText = 'Country';
         else if (autoId === 'addressSection_addressLine1') labelText = 'Address Line 1';
         else if (autoId === 'addressSection_city') labelText = 'City';
         else if (autoId === 'addressSection_postalCode') labelText = 'Postal Code';
+        else if (normAutoId.includes('source')) labelText = 'How Did You Hear About Us?';
         else if (autoId === 'file-upload-input-ref') labelText = 'Resume / CV';
         else labelText = autoId || name;
       }
@@ -191,7 +215,7 @@ export class WorkdayAdapter implements AtsAdapter {
       let type: FormFieldType = 'text';
       const role = el.getAttribute('role');
 
-      if (role === 'combobox') {
+      if (role === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox') {
         type = 'combobox';
       } else if (tag === 'SELECT') {
         type = 'select';

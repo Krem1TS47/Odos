@@ -147,6 +147,20 @@ export async function executeAutofill(
         field.label.toLowerCase().includes('resume') ||
         field.label.toLowerCase().includes('cv');
 
+      // Workday File Upload Invariant:
+      // Workday's internal React file uploaders require trusted human-initiated file picker events.
+      // Programmatic file injections trigger immediate unhandled VPS/I upload crashes in Workday's backend.
+      // Skip automated file attachment on Workday so Odos safely prefills all other fields.
+      const isWorkday =
+        window.location.hostname.includes('workday') ||
+        Boolean(field.element.closest('[data-automation-id]')) ||
+        Boolean(document.querySelector('[data-automation-id="form-page"], [data-automation-id="jobPostingHeader"]'));
+
+      if (isWorkday) {
+        emptyFields.push(field);
+        continue;
+      }
+
       if (isResume && payload.resumeFile && payload.resumeFile.data) {
         const success = fillFileInput(field.element as HTMLInputElement, payload.resumeFile);
         if (success) {
@@ -171,22 +185,33 @@ export async function executeAutofill(
       continue;
     }
 
+    let valToSet = match.value;
+    if (field.name.toLowerCase().includes('phone') || field.id.toLowerCase().includes('phone')) {
+      // If the field is a local phone number input (like Workday's phone-number), strip country code prefix
+      if (valToSet.startsWith('+1')) {
+        valToSet = valToSet.slice(2).trim();
+      } else if (valToSet.startsWith('+')) {
+        valToSet = valToSet.replace(/^\+\d{1,3}\s*/, '').trim();
+      }
+    }
+
     // 3. Framework-Safe Value Setting
     try {
       if (field.type === 'combobox') {
-        const filled = await fillComboboxWidget(field.element, match.value);
+        const filled = await fillComboboxWidget(field.element, valToSet);
         if (filled) {
-          field.matchedValue = match.value;
+          field.matchedValue = valToSet;
           field.confidence = match.confidence;
           field.matchedReason = match.reason;
           field.canonical = match.canonical;
           filledFields.push(field);
-          snapshot[field.name || field.id] = match.value;
+          snapshot[field.name || field.id] = valToSet;
+          await new Promise((r) => setTimeout(r, 150));
         } else {
           emptyFields.push(field);
         }
       } else if (field.type === 'select') {
-        const filled = fillSelectElement(field.element as HTMLSelectElement, match.value);
+        const filled = fillSelectElement(field.element as HTMLSelectElement, valToSet);
         if (filled) {
           field.matchedValue = (field.element as HTMLSelectElement).value;
           field.confidence = match.confidence;
@@ -198,27 +223,27 @@ export async function executeAutofill(
           emptyFields.push(field);
         }
       } else if (field.type === 'radio' || field.type === 'checkbox') {
-        const desiredState = match.value.toLowerCase() === 'yes' || match.value.toLowerCase() === 'true';
+        const desiredState = valToSet.toLowerCase() === 'yes' || valToSet.toLowerCase() === 'true';
         const filled = fillRadioOrCheckbox(field.element as HTMLInputElement, desiredState);
         if (filled) {
-          field.matchedValue = match.value;
+          field.matchedValue = valToSet;
           field.confidence = match.confidence;
           field.matchedReason = match.reason;
           field.canonical = match.canonical;
           filledFields.push(field);
-          snapshot[field.name || field.id] = match.value;
+          snapshot[field.name || field.id] = valToSet;
         } else {
           emptyFields.push(field);
         }
       } else {
         // Text, Email, Tel, URL, Textarea
-        setNativeValue(field.element as HTMLInputElement | HTMLTextAreaElement, match.value);
-        field.matchedValue = match.value;
+        setNativeValue(field.element as HTMLInputElement | HTMLTextAreaElement, valToSet);
+        field.matchedValue = valToSet;
         field.confidence = match.confidence;
         field.matchedReason = match.reason;
         field.canonical = match.canonical;
         filledFields.push(field);
-        snapshot[field.name || field.id] = match.value;
+        snapshot[field.name || field.id] = valToSet;
       }
     } catch (err) {
       console.warn(`[Odos] Error setting field ${field.label}:`, err);

@@ -11,6 +11,7 @@ export type CanonicalField =
   | 'email'
   | 'phone'
   | 'phone_country'
+  | 'phone_device_type'
   | 'address_line1'
   | 'city'
   | 'state'
@@ -85,6 +86,9 @@ export function resolveCanonicalValue(
 
     case 'phone':
       return contact.phone || null;
+
+    case 'phone_device_type':
+      return 'Mobile';
 
     case 'location':
       return contact.location || null;
