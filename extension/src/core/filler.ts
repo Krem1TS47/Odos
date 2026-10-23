@@ -1,6 +1,7 @@
 import { assertNotSubmitControl } from '../content/submitGuard';
 import { CanonicalField } from './fieldSchema';
 import { waitForElement } from './dom';
+import { findBestOptionMatch, OptionCandidate } from './dropdownResolver';
 
 export interface FillReportItem {
   fieldId: string;
@@ -41,31 +42,36 @@ export function setNativeValue(
 }
 
 /**
- * Fills a standard HTML <select> dropdown by matching text or value.
+ * Fills a standard HTML <select> dropdown by matching text, value, or semantic synonyms.
  */
 export function fillSelectElement(
   selectEl: HTMLSelectElement,
-  desiredValue: string
+  desiredValue: string,
+  hintCategory?: string
 ): boolean {
   assertNotSubmitControl(selectEl, 'fillSelectElement');
 
-  const normDesired = desiredValue.toLowerCase().trim();
-  let matchedIdx = -1;
-
+  const candidates: OptionCandidate[] = [];
   for (let i = 0; i < selectEl.options.length; i++) {
     const opt = selectEl.options[i];
-    const optText = opt.text.toLowerCase().trim();
-    const optVal = opt.value.toLowerCase().trim();
-
-    if (optText === normDesired || optVal === normDesired || optText.startsWith(normDesired)) {
-      matchedIdx = i;
-      break;
-    }
+    candidates.push({
+      text: opt.text,
+      value: opt.value,
+      index: i
+    });
   }
 
-  if (matchedIdx !== -1) {
+  const match = findBestOptionMatch(candidates, desiredValue, hintCategory);
+
+  if (match) {
+    const matchedIdx = match.candidate.index;
     selectEl.selectedIndex = matchedIdx;
     selectEl.value = selectEl.options[matchedIdx].value;
+
+    for (let i = 0; i < selectEl.options.length; i++) {
+      selectEl.options[i].selected = (i === matchedIdx);
+    }
+
     selectEl.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
     selectEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
     selectEl.dispatchEvent(new Event('blur', { bubbles: true, cancelable: true }));
@@ -104,30 +110,35 @@ export function fillRadioOrCheckbox(
 }
 
 /**
- * Fills a custom combobox or listbox widget (common in new Greenhouse and Workday).
- * Focuses control, searches, waits for role="option" elements, and clicks the best match.
+ * Fills a custom combobox, listbox, or creatable dropdown widget
+ * (React-Select, Radix UI, Workday Canvas Kit, Headless UI, etc.).
+ * Focuses control, searches, waits for options, matches semantic synonyms,
+ * and handles "Creatable / Add Option" clicks.
  */
 export async function fillComboboxWidget(
   comboboxEl: HTMLElement,
   desiredValue: string,
-  searchContainer: HTMLElement | Document = document
+  searchContainer: HTMLElement | Document = document,
+  hintCategory?: string
 ): Promise<boolean> {
   assertNotSubmitControl(comboboxEl, 'fillComboboxWidget');
-
-  const normDesired = desiredValue.toLowerCase().trim();
 
   // 1. Focus combobox and trigger popup
   if (typeof comboboxEl.focus === 'function') {
     comboboxEl.focus();
   }
+  comboboxEl.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
   comboboxEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+  comboboxEl.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
   comboboxEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
   comboboxEl.click();
 
-  // 2. If it's an input or has an embedded search input, type search text without blur
+  // 2. If it's an input or has an embedded search input, type search text
   const searchInput = comboboxEl instanceof HTMLInputElement
     ? comboboxEl
-    : comboboxEl.querySelector<HTMLInputElement>('input[type="text"], input[role="searchbox"], input[aria-autocomplete]');
+    : comboboxEl.querySelector<HTMLInputElement>(
+        'input[type="text"], input[role="searchbox"], input[aria-autocomplete], input.select__input, input[data-automation-id="searchBox"]'
+      );
 
   if (searchInput) {
     const proto = HTMLInputElement.prototype;
@@ -137,28 +148,58 @@ export async function fillComboboxWidget(
     } else {
       searchInput.value = desiredValue;
     }
-    searchInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    try {
+      searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: desiredValue }));
+    } catch {
+      searchInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    }
     searchInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    searchInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowDown', code: 'ArrowDown' }));
   }
 
-  // 3. Wait for options list to populate (search both searchContainer and document)
-  const optionSelector = '[role="option"], li[data-value], .option, [data-automation-id="promptOption"], [data-automation-id="select-item"]';
+  // 3. Wait for options list to populate (search both searchContainer and document body for portaled listboxes)
+  const optionSelector =
+    '[role="option"], li[data-value], .option, .select__option, div[id*="-option-"], [data-automation-id="promptOption"], [data-automation-id="select-item"], [data-automation-id="createOption"], [data-radix-collection-item], button[role="menuitem"]';
+  
   await waitForElement(optionSelector, 2000, searchContainer);
 
   const doc = searchContainer instanceof Document ? searchContainer : searchContainer.ownerDocument || document;
   const options = Array.from(doc.querySelectorAll<HTMLElement>(optionSelector));
 
-  const matchingOption = options.find((opt) => {
-    const text = (opt.textContent || '').toLowerCase().trim();
-    const val = (opt.getAttribute('data-value') || '').toLowerCase().trim();
-    return text === normDesired || val === normDesired || text.includes(normDesired) || normDesired.includes(text);
-  });
+  // Build candidate options list
+  const candidates: OptionCandidate[] = options.map((opt, idx) => ({
+    text: opt.textContent || '',
+    value: opt.getAttribute('data-value') || opt.getAttribute('value') || '',
+    index: idx,
+    element: opt
+  }));
 
-  if (matchingOption) {
-    // Workday Canvas Kit requires mousedown/mouseup to commit item in React state before click
+  const match = findBestOptionMatch(candidates, desiredValue, hintCategory);
+
+  if (match && match.candidate.element) {
+    const matchingOption = match.candidate.element;
+    // Workday Canvas Kit & React-Select require mousedown/mouseup sequence
+    matchingOption.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
     matchingOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    matchingOption.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
     matchingOption.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
     matchingOption.click();
+
+    // Trigger blur or change on combobox to commit state
+    comboboxEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    comboboxEl.dispatchEvent(new Event('blur', { bubbles: true, cancelable: true }));
+    return true;
+  }
+
+  // 4. Creatable / "+ Add Option" fallback: check if there is an Add button inside the popup
+  const addOptionBtn = doc.querySelector<HTMLElement>(
+    '[data-automation-id="createOption"], button.select__add-option, button.create-option, [role="button"][data-action="add"]'
+  );
+  if (addOptionBtn) {
+    assertNotSubmitControl(addOptionBtn, 'fillComboboxWidget:addOptionBtn');
+    addOptionBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    addOptionBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    addOptionBtn.click();
     return true;
   }
 

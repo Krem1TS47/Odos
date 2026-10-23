@@ -9,6 +9,7 @@ import {
   fillComboboxWidget,
   fillFileInput
 } from '../core/filler';
+import { processDynamicAdditions } from '../core/repeatableManager';
 
 export interface FillResult {
   filledFields: FormField[];
@@ -138,6 +139,15 @@ export async function executeAutofill(
   const emptyFields: FormField[] = [];
   const snapshot: Record<string, string> = {};
 
+  // Trigger dynamic additions for repeatable sections (Education, Experience, Websites)
+  try {
+    if (typeof document !== 'undefined') {
+      await processDynamicAdditions(document, payload.profile);
+    }
+  } catch (err) {
+    console.warn('[Odos Autofill] Dynamic additions skipped or failed:', err);
+  }
+
   for (const field of fields) {
     // 1. File Upload (Resume / CV)
     if (field.type === 'file') {
@@ -195,10 +205,30 @@ export async function executeAutofill(
       }
     }
 
+    // Determine hint category for semantic dropdown matching
+    let hintCategory: string | undefined = undefined;
+    if (match.canonical === 'work_authorization' || match.canonical === 'requires_sponsorship') {
+      hintCategory = 'boolean';
+    } else if (match.canonical === 'education_degree') {
+      hintCategory = 'degree';
+    } else if (match.canonical === 'phone_device_type') {
+      hintCategory = 'phone_type';
+    } else if (match.canonical === 'website_type') {
+      hintCategory = 'website_type';
+    } else if (match.canonical === 'eeo_gender') {
+      hintCategory = 'gender';
+    } else if (match.canonical === 'eeo_veteran') {
+      hintCategory = 'veteran';
+    } else if (match.canonical === 'eeo_disability') {
+      hintCategory = 'disability';
+    } else if (match.canonical === 'country') {
+      hintCategory = 'country';
+    }
+
     // 3. Framework-Safe Value Setting
     try {
       if (field.type === 'combobox') {
-        const filled = await fillComboboxWidget(field.element, valToSet);
+        const filled = await fillComboboxWidget(field.element, valToSet, document, hintCategory);
         if (filled) {
           field.matchedValue = valToSet;
           field.confidence = match.confidence;
@@ -211,7 +241,7 @@ export async function executeAutofill(
           emptyFields.push(field);
         }
       } else if (field.type === 'select') {
-        const filled = fillSelectElement(field.element as HTMLSelectElement, valToSet);
+        const filled = fillSelectElement(field.element as HTMLSelectElement, valToSet, hintCategory);
         if (filled) {
           field.matchedValue = (field.element as HTMLSelectElement).value;
           field.confidence = match.confidence;

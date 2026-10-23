@@ -3,6 +3,7 @@ import { executeAutofill } from './autofillEngine';
 import { ReviewPanelController } from './ui/panel';
 import { detectAts } from '../detect';
 import { detectPageCaptcha } from './captcha';
+import { processDynamicAdditions } from '../core/repeatableManager';
 
 console.log('[Odos] Content script active on:', window.location.href);
 
@@ -46,7 +47,22 @@ export async function handleRunOdos(): Promise<string> {
   // 1. Extract Job Details
   const jobPartial = adapter.extractJob(document, currentUrl);
 
-  // 2. Discover Fields
+  // 2. Request Profile and Stored Answers from Background (Single request per page: Section 6)
+  const bgDataResp = await chrome.runtime.sendMessage({ type: 'GET_PAGE_DATA' });
+  if (!bgDataResp?.success) {
+    throw new Error(bgDataResp?.error || 'Failed to fetch user data from Odos.');
+  }
+
+  const { profile, answers, defaultResume } = bgDataResp.data;
+
+  // 3. Process Dynamic Section Additions (e.g. "+ Add Education", "+ Add Experience", "+ Add Website")
+  try {
+    await processDynamicAdditions(document, profile);
+  } catch (err) {
+    console.warn('[Odos] Dynamic additions error:', err);
+  }
+
+  // 4. Discover Fields (includes both static and dynamically added dropdowns/inputs)
   const fields = adapter.discoverFields(document);
   if (fields.length === 0) {
     throw new Error('No interactive form fields discovered on this page.');
@@ -60,15 +76,7 @@ export async function handleRunOdos(): Promise<string> {
     }
   }
 
-  // 3. Request Profile and Stored Answers from Background (Single request per page: Section 6)
-  const bgDataResp = await chrome.runtime.sendMessage({ type: 'GET_PAGE_DATA' });
-  if (!bgDataResp?.success) {
-    throw new Error(bgDataResp?.error || 'Failed to fetch user data from Odos.');
-  }
-
-  const { profile, answers, defaultResume } = bgDataResp.data;
-
-  // 4. Retrieve Resume Binary if available
+  // 5. Retrieve Resume Binary if available
   let resumeFile: { fileName: string; fileType: string; data: ArrayBuffer } | null = null;
   if (defaultResume?.id) {
     currentResumeId = defaultResume.id;

@@ -117,7 +117,12 @@ export class WorkdayAdapter implements AtsAdapter {
     elements.forEach((el, index) => {
       // Only inspect interactive input/select/textarea controls or combobox/listbox triggers
       const tag = el.tagName.toUpperCase();
-      const isCombobox = el.getAttribute('role') === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox';
+      const isCombobox =
+        el.getAttribute('role') === 'combobox' ||
+        el.getAttribute('aria-haspopup') === 'listbox' ||
+        el.getAttribute('data-automation-id') === 'select-button' ||
+        el.getAttribute('data-automation-id') === 'dropdownWidget' ||
+        el.getAttribute('data-automation-id') === 'searchWidget';
       const isInput = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || isCombobox;
       if (!isInput) return;
 
@@ -198,6 +203,11 @@ export class WorkdayAdapter implements AtsAdapter {
         else if (autoId === 'addressSection_city') labelText = 'City';
         else if (autoId === 'addressSection_postalCode') labelText = 'Postal Code';
         else if (normAutoId.includes('source')) labelText = 'How Did You Hear About Us?';
+        else if (normAutoId.includes('school') || normAutoId.includes('institution')) labelText = 'School / University';
+        else if (normAutoId.includes('degree')) labelText = 'Degree';
+        else if (normAutoId.includes('fieldofstudy') || normAutoId.includes('field-of-study') || normAutoId.includes('major')) labelText = 'Field of Study';
+        else if (normAutoId.includes('gpa')) labelText = 'GPA';
+        else if (normAutoId.includes('websitetype') || normAutoId.includes('website-type')) labelText = 'Website Type';
         else if (autoId === 'file-upload-input-ref') labelText = 'Resume / CV';
         else labelText = autoId || name;
       }

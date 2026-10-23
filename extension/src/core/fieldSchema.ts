@@ -26,6 +26,18 @@ export type CanonicalField =
   | 'current_company'
   | 'current_title'
   | 'years_experience'
+  | 'education_school'
+  | 'education_degree'
+  | 'education_field'
+  | 'education_start_date'
+  | 'education_end_date'
+  | 'education_gpa'
+  | 'experience_company'
+  | 'experience_title'
+  | 'experience_start_date'
+  | 'experience_end_date'
+  | 'experience_summary'
+  | 'website_type'
   | 'resume'
   | 'cover_letter'
   | 'salary_expectation'
@@ -130,6 +142,42 @@ export function resolveCanonicalValue(
       const active = profile.experience.find((e) => (e as any).currentRole);
       return active?.title || profile.experience[0]?.title || null;
     }
+
+    case 'education_school':
+      return profile.education[0]?.school || null;
+
+    case 'education_degree':
+      return profile.education[0]?.degree || null;
+
+    case 'education_field':
+      return profile.education[0]?.field || null;
+
+    case 'education_start_date':
+      return profile.education[0]?.startDate || null;
+
+    case 'education_end_date':
+      return profile.education[0]?.endDate || null;
+
+    case 'education_gpa':
+      return profile.education[0]?.gpa || null;
+
+    case 'experience_company':
+      return profile.experience[0]?.company || null;
+
+    case 'experience_title':
+      return profile.experience[0]?.title || null;
+
+    case 'experience_start_date':
+      return profile.experience[0]?.startDate || null;
+
+    case 'experience_end_date':
+      return profile.experience[0]?.endDate || null;
+
+    case 'experience_summary':
+      return profile.experience[0]?.summary || null;
+
+    case 'website_type':
+      return contact.linkedin ? 'LinkedIn' : contact.github ? 'GitHub' : 'Portfolio';
 
     case 'work_authorization': {
       if (profile.workAuthorization.authorizedCountries.length === 0) return null;

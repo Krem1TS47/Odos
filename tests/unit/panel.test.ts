@@ -171,6 +171,7 @@ describe('Review Panel UI (Step 8)', () => {
         label: 'Full Name',
         type: 'text',
         element: input1,
+        required: true,
         matchedValue: 'Ada Lovelace'
       }
     ];
@@ -181,7 +182,8 @@ describe('Review Panel UI (Step 8)', () => {
         name: 'why',
         label: 'Why do you want to work here?',
         type: 'text',
-        element: input2
+        element: input2,
+        required: false
       }
     ];
 

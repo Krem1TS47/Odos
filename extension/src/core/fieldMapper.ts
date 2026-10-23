@@ -204,6 +204,14 @@ export function mapElementToCanonical(
     return { canonical: 'postal_code', confidence: 0.95, source: 'known_id', reason: 'workday:addressSection_postalCode' };
   }
 
+  // Workday / Generic Education & Experience known IDs
+  if (id.includes('fieldofstudy') || name.includes('fieldofstudy') || id.includes('field-of-study') || name.includes('field_of_study')) {
+    return { canonical: 'education_field', confidence: 0.95, source: 'known_id', reason: 'known_id:field_of_study' };
+  }
+  if (id.includes('websitetype') || name.includes('websitetype') || id.includes('website-type') || name.includes('website_type')) {
+    return { canonical: 'website_type', confidence: 0.95, source: 'known_id', reason: 'known_id:website_type' };
+  }
+
   // Greenhouse exact IDs
   if (id === 'first_name' || name === 'job_application[first_name]') {
     return { canonical: 'first_name', confidence: 0.95, source: 'known_id', reason: 'greenhouse:first_name' };
@@ -362,6 +370,35 @@ export function mapElementToCanonical(
     // Current Title
     if (/(current\s*title|current\s*role|job\s*title)/i.test(normLabel)) {
       return { canonical: 'current_title', confidence: 0.80, source: 'label', reason: 'label:current_title' };
+    }
+
+    // Education: Degree
+    if (/(degree|education\s*level|highest\s*education)/i.test(normLabel)) {
+      return { canonical: 'education_degree', confidence: 0.85, source: 'label', reason: 'label:education_degree' };
+    }
+
+    // Education: School / University (excludes open-ended memory/essay prompts or textareas)
+    if (
+      type !== 'textarea' &&
+      /(school|university|institution)(\s*name)?$/i.test(normLabel) &&
+      !/(memory|essay|tell us|why|describe)/i.test(normLabel)
+    ) {
+      return { canonical: 'education_school', confidence: 0.85, source: 'label', reason: 'label:education_school' };
+    }
+
+    // Education: Field of Study / Major
+    if (/(field\s*of\s*study|major|discipline|area\s*of\s*study)/i.test(normLabel)) {
+      return { canonical: 'education_field', confidence: 0.85, source: 'label', reason: 'label:education_field' };
+    }
+
+    // Education: GPA
+    if (/^gpa|grade\s*point\s*average/i.test(normLabel)) {
+      return { canonical: 'education_gpa', confidence: 0.85, source: 'label', reason: 'label:education_gpa' };
+    }
+
+    // Website / Link Type dropdown
+    if (/(website\s*type|link\s*type|url\s*type|media\s*type)/i.test(normLabel)) {
+      return { canonical: 'website_type', confidence: 0.85, source: 'label', reason: 'label:website_type' };
     }
   }
 

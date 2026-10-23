@@ -118,7 +118,7 @@ export class GreenhouseAdapter implements AtsAdapter {
     if (!form) return [];
 
     const elements = form.querySelectorAll<HTMLElement>(
-      'input, select, textarea, [role="combobox"]'
+      'input, select, textarea, [role="combobox"], [aria-haspopup="listbox"], .select__control'
     );
 
     const fields: FormField[] = [];
@@ -130,9 +130,14 @@ export class GreenhouseAdapter implements AtsAdapter {
 
       const inputEl = el as HTMLInputElement;
 
-      // Ignore hidden inputs, submit controls, and buttons
+      // Ignore hidden inputs, submit controls, and buttons that aren't comboboxes
+      const isCombobox =
+        el.getAttribute('role') === 'combobox' ||
+        el.getAttribute('aria-haspopup') === 'listbox' ||
+        el.classList.contains('select__control');
+
       if (inputEl.type === 'hidden' || isSubmitControl(el)) return;
-      if (el.tagName === 'BUTTON' && el.getAttribute('role') !== 'combobox') return;
+      if (el.tagName === 'BUTTON' && !isCombobox) return;
 
       const name = el.getAttribute('name') || '';
       const id = el.getAttribute('id') || `field_${index}`;
@@ -204,7 +209,7 @@ export class GreenhouseAdapter implements AtsAdapter {
       const tag = el.tagName.toUpperCase();
       const role = el.getAttribute('role');
 
-      if (role === 'combobox' || el.classList.contains('select__input')) {
+      if (isCombobox || role === 'combobox' || el.classList.contains('select__input')) {
         type = 'combobox';
       } else if (tag === 'SELECT') {
         type = 'select';

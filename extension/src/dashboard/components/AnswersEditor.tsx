@@ -1,12 +1,51 @@
 import React, { useState } from 'react';
 import { StoredAnswer, StoredAnswerCategory } from '../../core/models';
 import { repository } from '../../core/storage/repository';
-import { Plus, Trash2, Sparkles, Pencil, Check, X } from 'lucide-react';
+import { Plus, Trash2, Sparkles, Pencil, Check, X, ListFilter, CheckCircle2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Textarea } from '../../components/ui/textarea';
 import { Label } from '../../components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
+import { findBestOptionMatch } from '../../core/dropdownResolver';
+
+const DROPDOWN_PRESETS = [
+  {
+    label: 'Work Auth (Yes)',
+    patterns: ['Are you legally authorized to work in the United States?', 'Authorized to work in this country', 'Work authorization eligibility'],
+    answer: 'Yes',
+    category: 'eligibility' as StoredAnswerCategory,
+    autoFill: false
+  },
+  {
+    label: 'Visa Sponsorship (No)',
+    patterns: ['Will you now or in the future require visa sponsorship?', 'Do you require sponsorship?', 'Require immigration sponsorship'],
+    answer: 'No',
+    category: 'eligibility' as StoredAnswerCategory,
+    autoFill: false
+  },
+  {
+    label: 'Degree (Bachelor)',
+    patterns: ['Highest level of education completed?', 'Degree level', 'What degree have you earned?'],
+    answer: "Bachelor's Degree",
+    category: 'logistics' as StoredAnswerCategory,
+    autoFill: true
+  },
+  {
+    label: 'Phone Type (Mobile)',
+    patterns: ['Phone Device Type', 'Phone type', 'Primary phone type'],
+    answer: 'Mobile',
+    category: 'logistics' as StoredAnswerCategory,
+    autoFill: true
+  },
+  {
+    label: 'Referral (LinkedIn)',
+    patterns: ['How did you hear about this role?', 'Where did you find this job posting?', 'Referral source'],
+    answer: 'LinkedIn',
+    category: 'other' as StoredAnswerCategory,
+    autoFill: true
+  }
+];
 
 interface Props {
   answers: StoredAnswer[];
@@ -20,6 +59,18 @@ export const AnswersEditor: React.FC<Props> = ({ answers, onUpdate }) => {
   const [newAnswer, setNewAnswer] = useState('');
   const [newCategory, setNewCategory] = useState<StoredAnswerCategory>('other');
   const [newAutoFill, setNewAutoFill] = useState(false);
+  const [testOptions, setTestOptions] = useState('');
+
+  const testCandidates = testOptions
+    ? testOptions
+        .split(/[,;\n]/)
+        .map((t, idx) => ({ text: t.trim(), value: t.trim(), index: idx }))
+        .filter((c) => Boolean(c.text))
+    : [];
+
+  const testResult = testCandidates.length > 0 && newAnswer.trim()
+    ? findBestOptionMatch(testCandidates, newAnswer)
+    : null;
 
   // Editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -148,6 +199,33 @@ export const AnswersEditor: React.FC<Props> = ({ answers, onUpdate }) => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Quick Dropdown Presets */}
+            <div className="space-y-1.5 pb-2">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+                <ListFilter className="h-3.5 w-3.5 text-blue-500" />
+                <span>Quick Dropdown Presets:</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {DROPDOWN_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.label}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[11px] px-2"
+                    onClick={() => {
+                      setNewQuestion(preset.patterns.join('\n'));
+                      setNewAnswer(preset.answer);
+                      setNewCategory(preset.category);
+                      setNewAutoFill(preset.autoFill);
+                    }}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="new-question">Question Patterns (one per line)</Label>
@@ -169,6 +247,30 @@ export const AnswersEditor: React.FC<Props> = ({ answers, onUpdate }) => {
                   placeholder="e.g. Company Website / Careers page"
                 />
               </div>
+            </div>
+
+            {/* Dropdown Match Simulator */}
+            <div className="rounded-lg border border-border/80 bg-muted/30 p-2.5 space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-medium">
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                  Test Dropdown Selection:
+                </span>
+                <span className="text-[10px] text-muted-foreground">Checks semantic synonyms & options</span>
+              </div>
+              <input
+                type="text"
+                placeholder="Paste sample dropdown options (e.g. Yes; No; Other; Select one)"
+                value={testOptions}
+                onChange={(e) => setTestOptions(e.target.value)}
+                className="w-full h-7 rounded border border-input bg-background px-2 text-xs text-foreground"
+              />
+              {testResult && (
+                <div className="text-[11px] flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium pt-0.5">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>Selected: &quot;{testResult.candidate.text}&quot; (Score: {Math.round(testResult.score * 100)}% via {testResult.strategy})</span>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-2 gap-4 border-t border-border/60">

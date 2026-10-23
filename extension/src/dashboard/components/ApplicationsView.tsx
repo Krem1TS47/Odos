@@ -3,7 +3,6 @@ import { Application, ApplicationStatus, Job } from '../../core/models';
 import { repository } from '../../core/storage/repository';
 import { Briefcase, Eye, MessageSquare, ExternalLink, Search, ArrowUpDown } from 'lucide-react';
 import { Button } from '../../components/ui/button';
-import { Badge } from '../../components/ui/badge';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
 import { Label } from '../../components/ui/label';

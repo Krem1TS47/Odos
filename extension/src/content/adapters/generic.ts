@@ -81,7 +81,7 @@ export class GenericAdapter implements AtsAdapter {
   discoverFields(doc: Document): FormField[] {
     // Pierces open shadow roots to find inputs anywhere in the page
     const elements = deepQuerySelectorAll(
-      'input, select, textarea, [role="combobox"]',
+      'input, select, textarea, [role="combobox"], [aria-haspopup="listbox"], .select__control',
       doc
     ) as HTMLElement[];
 
@@ -93,10 +93,15 @@ export class GenericAdapter implements AtsAdapter {
       seenElements.add(el);
 
       const inputEl = el as HTMLInputElement;
+      const role = el.getAttribute('role');
+      const isCombobox =
+        role === 'combobox' ||
+        el.getAttribute('aria-haspopup') === 'listbox' ||
+        el.classList.contains('select__control');
 
       // Invariant 1: Strictly ignore submit controls
       if (inputEl.type === 'hidden' || isSubmitControl(el)) return;
-      if (el.tagName === 'BUTTON' && el.getAttribute('role') !== 'combobox') return;
+      if (el.tagName === 'BUTTON' && !isCombobox) return;
 
       const name = el.getAttribute('name') || '';
       const id = el.getAttribute('id') || `generic_field_${index}`;
@@ -110,9 +115,8 @@ export class GenericAdapter implements AtsAdapter {
 
       let type: FormFieldType = 'text';
       const tag = el.tagName.toUpperCase();
-      const role = el.getAttribute('role');
 
-      if (role === 'combobox') {
+      if (isCombobox) {
         type = 'combobox';
       } else if (tag === 'SELECT') {
         type = 'select';

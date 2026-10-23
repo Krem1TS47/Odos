@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { repository } from '../core/storage/repository';
-import { Sparkles, LayoutDashboard, Globe, Check, AlertCircle } from 'lucide-react';
+import { Sparkles, LayoutDashboard, Globe, Check } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Card, CardContent } from '../components/ui/card';
