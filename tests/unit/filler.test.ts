@@ -1,14 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   setNativeValue,
   fillSelectElement,
   fillRadioOrCheckbox,
+  fillRadioGroup,
+  fillCheckbox,
+  fillCheckboxGroup,
   fillFileInput,
   reconcileField
 } from '../../extension/src/core/filler';
 import { deepQuerySelector, deepQuerySelectorAll } from '../../extension/src/core/dom';
 
 describe('Filler and DOM Piercing (Step 4)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
   describe('setNativeValue', () => {
     it('sets input value and dispatches input, change, and blur events', () => {
       const input = document.createElement('input');
@@ -53,33 +60,43 @@ describe('Filler and DOM Piercing (Step 4)', () => {
       document.body.removeChild(btn);
     });
 
-    it('synchronizes React _valueTracker so React onChange triggers reliably', () => {
+    it('sets the value through the prototype setter and fires input so framework trackers see a change', () => {
+      // Content scripts run in the isolated world: page expandos like React's _valueTracker are
+      // invisible. React detects changes by comparing the DOM value against the value it last
+      // saw, so a prototype-level set followed by a real input event is what must happen.
       const input = document.createElement('input');
       input.type = 'text';
       document.body.appendChild(input);
 
-      // Simulate React 16-19 _valueTracker
-      let trackedVal = '';
-      (input as any)._valueTracker = {
-        getValue: () => trackedVal,
-        setValue: (v: string) => { trackedVal = v; }
-      };
-
-      let reactStateUpdated = false;
-      input.addEventListener('input', () => {
-        // React's internal check:
-        const tracker = (input as any)._valueTracker;
-        const lastValue = tracker ? tracker.getValue() : null;
-        if (input.value !== lastValue) {
-          tracker.setValue(input.value);
-          reactStateUpdated = true;
+      const protoSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      let instanceSetterCalled = false;
+      Object.defineProperty(input, 'value', {
+        configurable: true,
+        get() {
+          return Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.get!.call(input);
+        },
+        set(v: string) {
+          instanceSetterCalled = true;
+          protoSetter.call(input, v);
         }
       });
 
-      setNativeValue(input, 'Grace Hopper');
+      let lastSeen = '';
+      let changeDetected = false;
+      input.addEventListener('input', () => {
+        if (input.value !== lastSeen) {
+          lastSeen = input.value;
+          changeDetected = true;
+        }
+      });
 
+      const ok = setNativeValue(input, 'Grace Hopper');
+
+      expect(ok).toBe(true);
       expect(input.value).toBe('Grace Hopper');
-      expect(reactStateUpdated).toBe(true);
+      expect(changeDetected).toBe(true);
+      // The instance-level (framework) setter was bypassed, as React requires
+      expect(instanceSetterCalled).toBe(false);
       document.body.removeChild(input);
     });
 
@@ -153,19 +170,37 @@ describe('Filler and DOM Piercing (Step 4)', () => {
     });
   });
 
-  describe('fillRadioOrCheckbox', () => {
-    it('clicks radio button if not checked', () => {
-      const radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'sponsorship';
-      radio.value = 'no';
-      document.body.appendChild(radio);
+  describe('radio groups and checkboxes', () => {
+    function radioGroup(labels: string[]): HTMLInputElement[] {
+      const fs = document.createElement('fieldset');
+      fs.innerHTML = labels
+        .map((l, i) => `<label><input type="radio" name="q" value="v${i}" /> ${l}</label>`)
+        .join('');
+      document.body.appendChild(fs);
+      return Array.from(fs.querySelectorAll('input'));
+    }
 
-      const success = fillRadioOrCheckbox(radio, true);
-      expect(success).toBe(true);
-      expect(radio.checked).toBe(true);
+    it('picks the radio whose label matches the answer and leaves the others unchecked', () => {
+      const radios = radioGroup(['Yes', 'No']);
+      const outcome = fillRadioGroup(radios, 'No', 'boolean', ['Yes', 'No']);
+      expect(outcome.status).toBe('verified');
+      expect(radios[0].checked).toBe(false);
+      expect(radios[1].checked).toBe(true);
+      expect(outcome.value).toBe('No');
+    });
 
-      document.body.removeChild(radio);
+    it('resolves long-form radio labels through the synonym dictionary', () => {
+      const radios = radioGroup(['Yes, I will require sponsorship', 'No, I will not require sponsorship']);
+      const outcome = fillRadioGroup(radios, 'No', 'sponsorship', ['Yes, I will require sponsorship', 'No, I will not require sponsorship']);
+      expect(outcome.status).toBe('verified');
+      expect(radios[1].checked).toBe(true);
+    });
+
+    it('fails without clicking when no radio matches', () => {
+      const radios = radioGroup(['Apple', 'Banana']);
+      const outcome = fillRadioGroup(radios, 'Cherry', undefined, ['Apple', 'Banana']);
+      expect(outcome.status).toBe('failed');
+      expect(radios.some((r) => r.checked)).toBe(false);
     });
 
     it('toggles checkbox to match desired state', () => {
@@ -180,7 +215,23 @@ describe('Filler and DOM Piercing (Step 4)', () => {
       fillRadioOrCheckbox(checkbox, false);
       expect(checkbox.checked).toBe(false);
 
+      expect(fillCheckbox(checkbox, 'Yes').status).toBe('verified');
+      expect(checkbox.checked).toBe(true);
+      expect(fillCheckbox(checkbox, 'maybe').status).toBe('failed');
+
       document.body.removeChild(checkbox);
+    });
+
+    it('checks every option of a checkbox group named in a multi-value answer', () => {
+      const fs = document.createElement('fieldset');
+      fs.innerHTML = ['JavaScript', 'Python', 'Go', 'Rust']
+        .map((l, i) => `<label><input type="checkbox" name="langs[]" value="l${i}" /> ${l}</label>`)
+        .join('');
+      document.body.appendChild(fs);
+      const boxes = Array.from(fs.querySelectorAll('input'));
+      const outcome = fillCheckboxGroup(boxes, 'Python; Rust', undefined, ['JavaScript', 'Python', 'Go', 'Rust']);
+      expect(outcome.status).toBe('verified');
+      expect(boxes.map((b) => b.checked)).toEqual([false, true, false, true]);
     });
   });
 

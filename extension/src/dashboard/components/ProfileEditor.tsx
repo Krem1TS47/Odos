@@ -5,6 +5,7 @@ import { Plus, Trash2, FileText, Check } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { Textarea } from '../../components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 
@@ -25,6 +26,20 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
       }
       return { ...prev, contact: nextContact };
     });
+  };
+
+  const handleAddressChange = (field: keyof Profile['contact']['address'], value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      contact: { ...prev.contact, address: { ...prev.contact.address, [field]: value } }
+    }));
+  };
+
+  const handlePreferenceChange = (field: keyof Profile['preferences'], value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      preferences: { ...prev.preferences, [field]: value }
+    }));
   };
 
   const handleWorkAuthChange = (field: 'requiresSponsorship' | 'authorizedCountries', value: any) => {
@@ -110,7 +125,8 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
           title: '',
           startDate: '',
           endDate: '',
-          summary: ''
+          summary: '',
+          isCurrent: false
         }
       ]
     }));
@@ -205,6 +221,106 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
                 value={formData.contact.website}
                 onChange={(e) => handleContactChange('website', e.target.value)}
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="twitter">Twitter / X URL</Label>
+              <Input
+                id="twitter"
+                type="url"
+                value={formData.contact.twitter}
+                onChange={(e) => handleContactChange('twitter', e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pronouns">Pronouns</Label>
+              <Input
+                id="pronouns"
+                type="text"
+                value={formData.contact.pronouns}
+                onChange={(e) => handleContactChange('pronouns', e.target.value)}
+                placeholder="e.g. they/them"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Address */}
+      <Card className="border-border bg-card shadow-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-semibold">Address</CardTitle>
+          <CardDescription>Structured address used for street, city, state, postal code and country fields.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2 space-y-1.5">
+              <Label htmlFor="addr-line1">Street Address</Label>
+              <Input id="addr-line1" type="text" value={formData.contact.address.line1} onChange={(e) => handleAddressChange('line1', e.target.value)} />
+            </div>
+            <div className="md:col-span-2 space-y-1.5">
+              <Label htmlFor="addr-line2">Apartment / Suite</Label>
+              <Input id="addr-line2" type="text" value={formData.contact.address.line2} onChange={(e) => handleAddressChange('line2', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="addr-city">City</Label>
+              <Input id="addr-city" type="text" value={formData.contact.address.city} onChange={(e) => handleAddressChange('city', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="addr-state">State / Province</Label>
+              <Input id="addr-state" type="text" value={formData.contact.address.state} onChange={(e) => handleAddressChange('state', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="addr-postal">Postal Code</Label>
+              <Input id="addr-postal" type="text" value={formData.contact.address.postalCode} onChange={(e) => handleAddressChange('postalCode', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="addr-country">Country</Label>
+              <Input id="addr-country" type="text" value={formData.contact.address.country} onChange={(e) => handleAddressChange('country', e.target.value)} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Preferences */}
+      <Card className="border-border bg-card shadow-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-semibold">Availability &amp; Preferences</CardTitle>
+          <CardDescription>Answers for start date, notice period, experience, relocation and salary questions.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="pref-availability">Earliest Start / Availability</Label>
+              <Input id="pref-availability" type="text" value={formData.preferences.availability} onChange={(e) => handlePreferenceChange('availability', e.target.value)} placeholder="e.g. Immediately, 2 weeks notice, 2026-01-15" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pref-notice">Notice Period</Label>
+              <Input id="pref-notice" type="text" value={formData.preferences.noticePeriod} onChange={(e) => handlePreferenceChange('noticePeriod', e.target.value)} placeholder="e.g. 2 weeks" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pref-years">Years of Experience</Label>
+              <Input id="pref-years" type="text" value={formData.preferences.yearsExperience} onChange={(e) => handlePreferenceChange('yearsExperience', e.target.value)} placeholder="Blank = derived from your experience dates" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pref-relocate">Willing to Relocate</Label>
+              <select
+                id="pref-relocate"
+                value={formData.preferences.willingToRelocate}
+                onChange={(e) => handlePreferenceChange('willingToRelocate', e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+              >
+                <option value="">Not specified</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div className="md:col-span-2 space-y-1.5">
+              <Label htmlFor="pref-salary">Salary Expectation (sensitive, only filled when set)</Label>
+              <Input id="pref-salary" type="text" value={formData.preferences.salaryExpectation} onChange={(e) => handlePreferenceChange('salaryExpectation', e.target.value)} placeholder="e.g. $150,000" />
+            </div>
+            <div className="md:col-span-2 space-y-1.5">
+              <Label htmlFor="pref-cover">Default Cover Letter / Additional Information</Label>
+              <Textarea id="pref-cover" rows={4} value={formData.preferences.coverLetterTemplate} onChange={(e) => handlePreferenceChange('coverLetterTemplate', e.target.value)} />
             </div>
           </div>
         </CardContent>
@@ -375,6 +491,18 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
                     className="h-8 text-xs"
                   />
                 </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Start (YYYY-MM)</Label>
+                  <Input type="text" value={edu.startDate} onChange={(e) => { const updated = [...formData.education]; updated[idx].startDate = e.target.value; setFormData({ ...formData, education: updated }); }} className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px]">End (YYYY-MM)</Label>
+                  <Input type="text" value={edu.endDate} onChange={(e) => { const updated = [...formData.education]; updated[idx].endDate = e.target.value; setFormData({ ...formData, education: updated }); }} className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px]">GPA</Label>
+                  <Input type="text" value={edu.gpa} onChange={(e) => { const updated = [...formData.education]; updated[idx].gpa = e.target.value; setFormData({ ...formData, education: updated }); }} className="h-8 text-xs" />
+                </div>
               </div>
             </div>
           ))}
@@ -429,6 +557,24 @@ export const ProfileEditor: React.FC<Props> = ({ profile, onUpdate }) => {
                     }}
                     className="h-8 text-xs"
                   />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Start (YYYY-MM)</Label>
+                  <Input type="text" value={exp.startDate} onChange={(e) => { const updated = [...formData.experience]; updated[idx].startDate = e.target.value; setFormData({ ...formData, experience: updated }); }} className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px]">End (YYYY-MM)</Label>
+                  <Input type="text" value={exp.endDate} disabled={exp.isCurrent} onChange={(e) => { const updated = [...formData.experience]; updated[idx].endDate = e.target.value; setFormData({ ...formData, experience: updated }); }} className="h-8 text-xs" />
+                </div>
+                <div className="md:col-span-2 flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id={`exp-current-${exp.id}`}
+                    checked={exp.isCurrent}
+                    onChange={(e) => { const updated = [...formData.experience]; updated[idx].isCurrent = e.target.checked; setFormData({ ...formData, experience: updated }); }}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  <Label htmlFor={`exp-current-${exp.id}`} className="text-[11px] font-normal cursor-pointer">I currently work here</Label>
                 </div>
               </div>
             </div>

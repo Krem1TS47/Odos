@@ -339,6 +339,7 @@ describe('Field Mapper & Canonical Schema (Step 3)', () => {
     const profile: Profile = {
       ...DEFAULT_PROFILE,
       contact: {
+        ...DEFAULT_PROFILE.contact,
         firstName: 'Jane',
         lastName: 'Doe',
         fullName: 'Jane Doe',

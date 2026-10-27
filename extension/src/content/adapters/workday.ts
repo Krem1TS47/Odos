@@ -1,14 +1,9 @@
-import { AtsAdapter, FormField, FormFieldType } from './types';
-import { Job } from '../../core/models';
-import { isSubmitControl } from '../submitGuard';
-import { detectPageCaptcha, CaptchaDetection } from '../captcha';
+import { AtsAdapter, FormField } from './types';
+import { collectControls, describeControl } from '../../core/controlClassifier';
+import { escapeCss } from '../../core/dom';
 
-function escapeCss(str: string): string {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(str);
-  }
-  return str.replace(/([!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~])/g, '\\$1');
-}
+import { Job } from '../../core/models';
+import { detectPageCaptcha, CaptchaDetection } from '../captcha';
 
 export class WorkdayAdapter implements AtsAdapter {
   id = 'workday';
@@ -107,165 +102,73 @@ export class WorkdayAdapter implements AtsAdapter {
 
     if (!form) return [];
 
-    const elements = form.querySelectorAll<HTMLElement>(
-      'input, select, textarea, [role="combobox"], [aria-haspopup="listbox"], [data-automation-id]'
-    );
+    const WRAPPER_IDS = new Set(['dropdownWidget', 'select-button', 'searchWidget', 'selectWidget', 'multiselectInputContainer']);
 
-    const fields: FormField[] = [];
-    const seenElements = new Set<HTMLElement>();
-
-    elements.forEach((el, index) => {
-      // Only inspect interactive input/select/textarea controls or combobox/listbox triggers
-      const tag = el.tagName.toUpperCase();
-      const isCombobox =
-        el.getAttribute('role') === 'combobox' ||
-        el.getAttribute('aria-haspopup') === 'listbox' ||
-        el.getAttribute('data-automation-id') === 'select-button' ||
-        el.getAttribute('data-automation-id') === 'dropdownWidget' ||
-        el.getAttribute('data-automation-id') === 'searchWidget';
-      const isInput = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || isCombobox;
-      if (!isInput) return;
-
-      if (seenElements.has(el)) return;
-      seenElements.add(el);
-
-      const inputEl = el as HTMLInputElement;
-
-      // Invariant 1: Strictly ignore submit or navigation controls
-      if (inputEl.type === 'hidden' || isSubmitControl(el)) return;
-      if (tag === 'BUTTON' && !isCombobox) return;
-
-      // Extract automation ID, falling back to parent container with data-automation-id
-      const directAutoId = el.getAttribute('data-automation-id') || '';
-      const parentAutoId = el.closest('[data-automation-id]:not([data-automation-id="form-page"])')?.getAttribute('data-automation-id') || '';
-      const autoId = (directAutoId && directAutoId !== 'dropdownWidget' && directAutoId !== 'select-button')
-        ? directAutoId
-        : (parentAutoId || directAutoId);
-
-      const name = el.getAttribute('name') || autoId;
-      const id = el.getAttribute('id') || autoId || `wd_field_${index}`;
-
-      // Extract label
-      let labelText = '';
-
-      // 0. aria-labelledby (Standard for Workday Canvas Kit comboboxes and buttons)
-      const labelledBy = el.getAttribute('aria-labelledby');
-      if (labelledBy) {
-        const ids = labelledBy.split(/\s+/).filter(Boolean);
-        const textParts = ids
-          .map((lblId) => doc.getElementById(lblId)?.textContent?.trim())
-          .filter(Boolean);
-        if (textParts.length > 0) {
-          labelText = textParts.join(' ');
-        }
+    const autoIdFor = (el: HTMLElement): string => {
+      const direct = el.getAttribute('data-automation-id') || '';
+      const parent =
+        el.closest('[data-automation-id]:not([data-automation-id="form-page"])')?.getAttribute('data-automation-id') || '';
+      if (direct && !WRAPPER_IDS.has(direct)) return direct;
+      // Walk past wrapper widgets to the field-level automation id
+      let node: Element | null = el.parentElement;
+      while (node) {
+        const id = node.getAttribute('data-automation-id');
+        if (id && id !== 'form-page' && !WRAPPER_IDS.has(id)) return id;
+        node = node.parentElement;
       }
+      return parent || direct;
+    };
 
-      // 1. label[for="id"]
-      if (!labelText && id && !id.startsWith('wd_field_')) {
-        const labelEl = doc.querySelector(`label[for="${escapeCss(id)}"]`);
-        if (labelEl?.textContent) {
-          labelText = labelEl.textContent;
-        }
-      }
-
-      // 2. Preceding or wrapping label/legend
-      if (!labelText) {
-        const parentLabel = el.closest('label');
-        if (parentLabel?.textContent) {
-          labelText = parentLabel.textContent;
-        }
-      }
-
-      // 3. Workday automation label conventions: [data-automation-id="<autoId>Label"]
-      if (!labelText && autoId) {
-        const autoLabel = doc.querySelector(`[data-automation-id="${escapeCss(autoId)}Label"]`);
-        if (autoLabel?.textContent) {
-          labelText = autoLabel.textContent;
-        }
-      }
-
-      // 4. Attribute fallbacks
-      if (!labelText) {
-        labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
-      }
-
-      // 5. Friendly names for common Workday automation IDs
+    const friendlyLabel = (autoId: string, name: string): string => {
       const normAutoId = autoId.toLowerCase();
-      if (!labelText || labelText.toLowerCase() === 'select one' || labelText.toLowerCase() === 'select') {
-        if (autoId === 'legalNameSection_firstName') labelText = 'First Name';
-        else if (autoId === 'legalNameSection_lastName') labelText = 'Last Name';
-        else if (autoId === 'email') labelText = 'Email Address';
-        else if (autoId === 'phone-number') labelText = 'Phone Number';
-        else if (normAutoId.includes('phone-device-type')) labelText = 'Phone Device Type';
-        else if (normAutoId.includes('countryregion') || normAutoId.includes('state')) labelText = 'State';
-        else if (normAutoId.includes('country')) labelText = 'Country';
-        else if (autoId === 'addressSection_addressLine1') labelText = 'Address Line 1';
-        else if (autoId === 'addressSection_city') labelText = 'City';
-        else if (autoId === 'addressSection_postalCode') labelText = 'Postal Code';
-        else if (normAutoId.includes('source')) labelText = 'How Did You Hear About Us?';
-        else if (normAutoId.includes('school') || normAutoId.includes('institution')) labelText = 'School / University';
-        else if (normAutoId.includes('degree')) labelText = 'Degree';
-        else if (normAutoId.includes('fieldofstudy') || normAutoId.includes('field-of-study') || normAutoId.includes('major')) labelText = 'Field of Study';
-        else if (normAutoId.includes('gpa')) labelText = 'GPA';
-        else if (normAutoId.includes('websitetype') || normAutoId.includes('website-type')) labelText = 'Website Type';
-        else if (autoId === 'file-upload-input-ref') labelText = 'Resume / CV';
-        else labelText = autoId || name;
-      }
+      if (autoId === 'legalNameSection_firstName') return 'First Name';
+      if (autoId === 'legalNameSection_lastName') return 'Last Name';
+      if (autoId === 'email') return 'Email Address';
+      if (autoId === 'phone-number') return 'Phone Number';
+      if (normAutoId.includes('phone-device-type')) return 'Phone Device Type';
+      if (normAutoId.includes('countryregion') || normAutoId.includes('state')) return 'State';
+      if (normAutoId.includes('country')) return 'Country';
+      if (autoId === 'addressSection_addressLine1') return 'Address Line 1';
+      if (autoId === 'addressSection_city') return 'City';
+      if (autoId === 'addressSection_postalCode') return 'Postal Code';
+      if (normAutoId.includes('source')) return 'How Did You Hear About Us?';
+      if (normAutoId.includes('school') || normAutoId.includes('institution')) return 'School / University';
+      if (normAutoId.includes('degree')) return 'Degree';
+      if (normAutoId.includes('fieldofstudy') || normAutoId.includes('field-of-study') || normAutoId.includes('major')) return 'Field of Study';
+      if (normAutoId.includes('gpa')) return 'GPA';
+      if (normAutoId.includes('websitetype') || normAutoId.includes('website-type')) return 'Website Type';
+      if (autoId === 'file-upload-input-ref') return 'Resume / CV';
+      return autoId || name;
+    };
 
-      const cleanLabel = labelText.replace(/[*]/g, '').trim();
-
-      // Determine required
-      const isRequired =
-        inputEl.required ||
-        el.getAttribute('aria-required') === 'true' ||
-        labelText.includes('*') ||
-        Boolean(el.closest('div')?.querySelector('[data-automation-id="requiredStar"]'));
-
-      // Determine type
-      let type: FormFieldType = 'text';
-      const role = el.getAttribute('role');
-
-      if (role === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox') {
-        type = 'combobox';
-      } else if (tag === 'SELECT') {
-        type = 'select';
-      } else if (tag === 'TEXTAREA') {
-        type = 'textarea';
-      } else if (inputEl.type === 'email' || autoId === 'email') {
-        type = 'email';
-      } else if (inputEl.type === 'tel' || autoId === 'phone-number') {
-        type = 'tel';
-      } else if (inputEl.type === 'file' || autoId === 'file-upload-input-ref') {
-        type = 'file';
-      } else if (inputEl.type === 'checkbox') {
-        type = 'checkbox';
-      } else if (inputEl.type === 'radio') {
-        type = 'radio';
-      }
-
-      let options: string[] | undefined;
-      if (tag === 'SELECT') {
-        const selectEl = el as HTMLSelectElement;
-        options = Array.from(selectEl.options)
-          .map((opt) => opt.text.trim())
-          .filter((txt) => txt && !txt.startsWith('--'));
-      }
-
-      const isCustomQuestion = !autoId.startsWith('legalNameSection_') && autoId !== 'email' && autoId !== 'phone-number';
-
-      fields.push({
-        id,
-        name,
-        label: cleanLabel,
-        type,
-        element: el,
-        required: isRequired,
-        options,
-        isCustomQuestion
+    const controls = collectControls(form, doc);
+    return controls.map((control, index) => {
+      const autoId = autoIdFor(control.element);
+      const field = describeControl(control, index, doc, {
+        idPrefix: 'wd_field',
+        identify: (c) => ({
+          name: c.element.getAttribute('name') || autoId,
+          id: c.element.getAttribute('id') || autoId || `wd_field_${index}`
+        }),
+        labelExtras: {
+          attributeLabel: (_el, d) => {
+            if (!autoId) return null;
+            const lbl = d.querySelector(`[data-automation-id="${escapeCss(autoId)}Label"]`);
+            return lbl?.textContent || null;
+          },
+          fallbackToName: false
+        },
+        finalizeLabel: (label, c) => {
+          const name = c.element.getAttribute('name') || autoId;
+          const lower = label.toLowerCase();
+          if (!label || lower === 'select one' || lower === 'select') return friendlyLabel(autoId, name);
+          return label;
+        },
+        isRequired: (c) => Boolean(c.element.closest('div')?.querySelector('[data-automation-id="requiredStar"]'))
       });
+      field.isCustomQuestion = !autoId.startsWith('legalNameSection_') && autoId !== 'email' && autoId !== 'phone-number';
+      return field;
     });
-
-    return fields;
   }
 
   confirmationDetected(url: URL, doc: Document): boolean {

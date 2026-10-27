@@ -2,6 +2,11 @@ import { repository } from '../core/storage/repository';
 import { generateDedupeKey } from '../core/dedupe';
 import { Job } from '../core/models';
 import bundledConfig from '../core/config/bundledConfig.json';
+import { PromptApiProvider, SemanticMatcher, SemanticRequest } from '../core/semantic';
+
+// Semantic tier (eng review R6b): the on-device Prompt API is reachable from extension
+// contexts, so the content script asks the worker over messaging. Unavailable => null.
+const semanticMatcher = new SemanticMatcher(new PromptApiProvider(), { timeoutMs: 2500 });
 
 // Automatically seed profile, answers, and resumes from bundled repo YAML on extension install/update
 chrome.runtime.onInstalled.addListener(async () => {
@@ -132,6 +137,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           const { applicationId, submittedAnswers, resumeId } = message.payload;
           const updated = await repository.markApplicationSubmitted(applicationId, submittedAnswers, resumeId);
           sendResponse({ success: true, data: { application: updated } });
+          break;
+        }
+
+        case 'SAVE_ANSWER': {
+          const { question, answer, answerId, category, autoFill } = message.payload || {};
+          const saved = await repository.rememberAnswer({ question, answer, answerId, category, autoFill });
+          sendResponse({ success: true, data: { answer: saved } });
+          break;
+        }
+
+        case 'SEMANTIC_MATCH': {
+          const request = message.payload as SemanticRequest;
+          const decision = await semanticMatcher.match(request);
+          sendResponse({ success: true, data: { decision, provider: semanticMatcher.providerId } });
+          break;
+        }
+
+        case 'SEMANTIC_STATUS': {
+          const available = await semanticMatcher.isAvailable();
+          sendResponse({ success: true, data: { available, provider: semanticMatcher.providerId } });
           break;
         }
 

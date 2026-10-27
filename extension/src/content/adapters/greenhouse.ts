@@ -1,14 +1,8 @@
-import { AtsAdapter, FormField, FormFieldType } from './types';
-import { Job } from '../../core/models';
-import { isSubmitControl } from '../submitGuard';
-import { detectPageCaptcha, CaptchaDetection } from '../captcha';
+import { AtsAdapter, FormField } from './types';
+import { collectControls, describeControl } from '../../core/controlClassifier';
 
-function escapeCss(str: string): string {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(str);
-  }
-  return str.replace(/([!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~])/g, '\\$1');
-}
+import { Job } from '../../core/models';
+import { detectPageCaptcha, CaptchaDetection } from '../captcha';
 
 export class GreenhouseAdapter implements AtsAdapter {
   id = 'greenhouse';
@@ -117,142 +111,20 @@ export class GreenhouseAdapter implements AtsAdapter {
 
     if (!form) return [];
 
-    const elements = form.querySelectorAll<HTMLElement>(
-      'input, select, textarea, [role="combobox"], [aria-haspopup="listbox"], .select__control'
-    );
-
-    const fields: FormField[] = [];
-    const seenElements = new Set<HTMLElement>();
-
-    elements.forEach((el, index) => {
-      if (seenElements.has(el)) return;
-      seenElements.add(el);
-
-      const inputEl = el as HTMLInputElement;
-
-      // Ignore hidden inputs, submit controls, and buttons that aren't comboboxes
-      const isCombobox =
-        el.getAttribute('role') === 'combobox' ||
-        el.getAttribute('aria-haspopup') === 'listbox' ||
-        el.classList.contains('select__control');
-
-      if (inputEl.type === 'hidden' || isSubmitControl(el)) return;
-      if (el.tagName === 'BUTTON' && !isCombobox) return;
-
-      const name = el.getAttribute('name') || '';
-      const id = el.getAttribute('id') || `field_${index}`;
-
-      // Extract label
-      let labelText = '';
-
-      // 1. label[for="id"]
-      if (id) {
-        const labelEl = doc.querySelector(`label[for="${escapeCss(id)}"]`);
-        if (labelEl?.textContent) {
-          labelText = labelEl.textContent;
-        }
-      }
-
-      // 2. id-label (common in modern React Greenhouse boards)
-      if (!labelText && id) {
-        const labelEl = doc.getElementById(`${id}-label`);
-        if (labelEl?.textContent) {
-          labelText = labelEl.textContent;
-        }
-      }
-
-      // 3. aria-labelledby
-      if (!labelText) {
-        const labelledBy = el.getAttribute('aria-labelledby');
-        if (labelledBy) {
-          const labelEl = doc.getElementById(labelledBy);
-          if (labelEl?.textContent) {
-            labelText = labelEl.textContent;
-          }
-        }
-      }
-
-      // 4. Wrapping label
-      if (!labelText) {
-        const parentLabel = el.closest('label');
-        if (parentLabel?.textContent) {
-          labelText = parentLabel.textContent;
-        }
-      }
-
-      // 5. Container label
-      if (!labelText) {
-        const container = el.closest('.field-wrapper, .field, .form-group, .input-container, .select__container');
-        const containerLabel = container?.querySelector('label');
-        if (containerLabel?.textContent) {
-          labelText = containerLabel.textContent;
-        }
-      }
-
-      // 6. Attribute fallbacks
-      if (!labelText) {
-        labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || name;
-      }
-
-      // Clean label
-      const cleanLabel = labelText.replace(/[*]/g, '').trim();
-
-      // Determine required
-      const isRequired =
-        inputEl.required ||
-        el.getAttribute('aria-required') === 'true' ||
-        labelText.includes('*') ||
-        Boolean(el.closest('.field-wrapper, .field, .form-group')?.querySelector('.asterisk, .required, [aria-hidden="true"]'));
-
-      // Determine type
-      let type: FormFieldType = 'text';
-      const tag = el.tagName.toUpperCase();
-      const role = el.getAttribute('role');
-
-      if (isCombobox || role === 'combobox' || el.classList.contains('select__input')) {
-        type = 'combobox';
-      } else if (tag === 'SELECT') {
-        type = 'select';
-      } else if (tag === 'TEXTAREA') {
-        type = 'textarea';
-      } else if (inputEl.type === 'email') {
-        type = 'email';
-      } else if (inputEl.type === 'tel') {
-        type = 'tel';
-      } else if (inputEl.type === 'url') {
-        type = 'url';
-      } else if (inputEl.type === 'file') {
-        type = 'file';
-      } else if (inputEl.type === 'checkbox') {
-        type = 'checkbox';
-      } else if (inputEl.type === 'radio') {
-        type = 'radio';
-      }
-
-      // Options for selects
-      let options: string[] | undefined;
-      if (tag === 'SELECT') {
-        const selectEl = el as HTMLSelectElement;
-        options = Array.from(selectEl.options)
-          .map((opt) => opt.text.trim())
-          .filter((txt) => txt && !txt.startsWith('--'));
-      }
-
-      const isCustomQuestion = id.startsWith('question_') || name.includes('answers');
-
-      fields.push({
-        id,
-        name,
-        label: cleanLabel,
-        type,
-        element: el,
-        required: isRequired,
-        options,
-        isCustomQuestion
+    const controls = collectControls(form, doc);
+    return controls.map((control, index) => {
+      const field = describeControl(control, index, doc, {
+        idPrefix: 'field',
+        labelExtras: {
+          idSuffixes: ['-label'],
+          containerSelectors: ['.field-wrapper', '.field', '.form-group', '.input-container', '.select__container']
+        },
+        isRequired: (c) =>
+          Boolean(c.element.closest('.field-wrapper, .field, .form-group')?.querySelector('.asterisk, .required, [aria-hidden="true"]'))
       });
+      field.isCustomQuestion = field.id.startsWith('question_') || field.name.includes('answers');
+      return field;
     });
-
-    return fields;
   }
 
   confirmationDetected(url: URL, doc: Document): boolean {

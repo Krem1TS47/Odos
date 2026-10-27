@@ -54,6 +54,7 @@ export const App: React.FC = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [profileIssue, setProfileIssue] = useState<string | null>(null);
 
   const setActiveTab = (tab: TabKey) => {
     setActiveTabState(tab);
@@ -99,6 +100,8 @@ export const App: React.FC = () => {
       setAnswers(loadedAnswers);
       setJobs(loadedJobs);
       setApplications(loadedApps);
+      const status = repository.getProfileLoadStatus();
+      setProfileIssue(status.ok ? null : status.issue);
     } finally {
       setLoading(false);
     }
@@ -250,6 +253,11 @@ export const App: React.FC = () => {
 
         {/* Content Area */}
         <main className="flex-1 min-w-0">
+          {profileIssue && (
+            <div role="alert" className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <strong>Profile not loaded:</strong> {profileIssue}
+            </div>
+          )}
           {loading ? (
             <div className="flex h-64 items-center justify-center">
               <div className="text-xs text-muted-foreground font-mono">Loading data from IndexedDB...</div>

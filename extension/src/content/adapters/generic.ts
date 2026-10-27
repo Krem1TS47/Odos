@@ -1,9 +1,10 @@
-import { AtsAdapter, FormField, FormFieldType } from './types';
+import { AtsAdapter, FormField } from './types';
 import { Job } from '../../core/models';
 import { isSubmitControl } from '../submitGuard';
 import { detectPageCaptcha, CaptchaDetection } from '../captcha';
 import { deepQuerySelectorAll } from '../../core/dom';
-import { getElementLabelText, mapElementToCanonical } from '../../core/fieldMapper';
+import { mapElementToCanonical } from '../../core/fieldMapper';
+import { collectControls, describeControl } from '../../core/controlClassifier';
 
 export class GenericAdapter implements AtsAdapter {
   id = 'generic';
@@ -79,88 +80,17 @@ export class GenericAdapter implements AtsAdapter {
   }
 
   discoverFields(doc: Document): FormField[] {
-    // Pierces open shadow roots to find inputs anywhere in the page
-    const elements = deepQuerySelectorAll(
-      'input, select, textarea, [role="combobox"], [aria-haspopup="listbox"], .select__control',
-      doc
-    ) as HTMLElement[];
+    // Pierces open shadow roots to find controls anywhere in the page
+    const controls = collectControls(doc, doc, { deep: true });
 
-    const fields: FormField[] = [];
-    const seenElements = new Set<HTMLElement>();
-
-    elements.forEach((el, index) => {
-      if (seenElements.has(el)) return;
-      seenElements.add(el);
-
-      const inputEl = el as HTMLInputElement;
-      const role = el.getAttribute('role');
-      const isCombobox =
-        role === 'combobox' ||
-        el.getAttribute('aria-haspopup') === 'listbox' ||
-        el.classList.contains('select__control');
-
-      // Invariant 1: Strictly ignore submit controls
-      if (inputEl.type === 'hidden' || isSubmitControl(el)) return;
-      if (el.tagName === 'BUTTON' && !isCombobox) return;
-
-      const name = el.getAttribute('name') || '';
-      const id = el.getAttribute('id') || `generic_field_${index}`;
-      const labelText = getElementLabelText(el) || el.getAttribute('placeholder') || name;
-      const cleanLabel = labelText.replace(/[*]/g, '').trim();
-
-      const isRequired =
-        inputEl.required ||
-        el.getAttribute('aria-required') === 'true' ||
-        labelText.includes('*');
-
-      let type: FormFieldType = 'text';
-      const tag = el.tagName.toUpperCase();
-
-      if (isCombobox) {
-        type = 'combobox';
-      } else if (tag === 'SELECT') {
-        type = 'select';
-      } else if (tag === 'TEXTAREA') {
-        type = 'textarea';
-      } else if (inputEl.type === 'email') {
-        type = 'email';
-      } else if (inputEl.type === 'tel') {
-        type = 'tel';
-      } else if (inputEl.type === 'url') {
-        type = 'url';
-      } else if (inputEl.type === 'file') {
-        type = 'file';
-      } else if (inputEl.type === 'checkbox') {
-        type = 'checkbox';
-      } else if (inputEl.type === 'radio') {
-        type = 'radio';
-      }
-
-      let options: string[] | undefined;
-      if (tag === 'SELECT') {
-        const selectEl = el as HTMLSelectElement;
-        options = Array.from(selectEl.options)
-          .map((opt) => opt.text.trim())
-          .filter((txt) => txt && !txt.startsWith('--'));
-      }
-
-      // Pre-map canonical field
-      const mapping = mapElementToCanonical(el);
-
-      fields.push({
-        id,
-        name,
-        label: cleanLabel,
-        type,
-        element: el,
-        required: isRequired,
-        options,
-        canonical: mapping.canonical,
-        confidence: mapping.confidence
-      });
+    return controls.map((control, index) => {
+      const field = describeControl(control, index, doc, { idPrefix: 'generic_field' });
+      // Pre-map canonical field for callers that want a quick confidence read
+      const mapping = mapElementToCanonical(control.element, { labelText: field.label });
+      field.canonical = mapping.canonical;
+      field.confidence = mapping.confidence;
+      return field;
     });
-
-    return fields;
   }
 
   confirmationDetected(url: URL, doc: Document): boolean {

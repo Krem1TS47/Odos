@@ -1,14 +1,8 @@
-import { AtsAdapter, FormField, FormFieldType } from './types';
-import { Job } from '../../core/models';
-import { isSubmitControl } from '../submitGuard';
-import { detectPageCaptcha, CaptchaDetection } from '../captcha';
+import { AtsAdapter, FormField } from './types';
+import { collectControls, describeControl } from '../../core/controlClassifier';
 
-function escapeCss(str: string): string {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(str);
-  }
-  return str.replace(/([!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~])/g, '\\$1');
-}
+import { Job } from '../../core/models';
+import { detectPageCaptcha, CaptchaDetection } from '../captcha';
 
 export class AshbyAdapter implements AtsAdapter {
   id = 'ashby';
@@ -107,134 +101,25 @@ export class AshbyAdapter implements AtsAdapter {
 
     if (!form) return [];
 
-    const elements = form.querySelectorAll<HTMLElement>(
-      'input, select, textarea, [role="combobox"]'
-    );
-
-    const fields: FormField[] = [];
-    const seenElements = new Set<HTMLElement>();
-
-    elements.forEach((el, index) => {
-      if (seenElements.has(el)) return;
-      seenElements.add(el);
-
-      const inputEl = el as HTMLInputElement;
-
-      // Ignore hidden inputs, submit controls, and buttons
-      if (inputEl.type === 'hidden' || isSubmitControl(el)) return;
-      if (el.tagName === 'BUTTON' && el.getAttribute('role') !== 'combobox') return;
-
-      const name = el.getAttribute('name') || '';
-      const id = el.getAttribute('id') || `ashby_field_${index}`;
-
-      // Extract label
-      let labelText = '';
-
-      // 1. label[for="id"]
-      if (id && !id.startsWith('ashby_field_')) {
-        const labelEl = doc.querySelector(`label[for="${escapeCss(id)}"]`);
-        if (labelEl?.textContent) {
-          labelText = labelEl.textContent;
-        }
-      }
-
-      // 2. id-label
-      if (!labelText && id) {
-        const labelEl = doc.getElementById(`${id}-label`);
-        if (labelEl?.textContent) {
-          labelText = labelEl.textContent;
-        }
-      }
-
-      // 3. Parent label
-      if (!labelText) {
-        const parentLabel = el.closest('label');
-        if (parentLabel?.textContent) {
-          labelText = parentLabel.textContent;
-        }
-      }
-
-      // 4. Wrapping field container (search previous sibling or parent container heading/label)
-      if (!labelText) {
-        const container = el.parentElement;
-        const containerLabel = container?.querySelector('label');
-        if (containerLabel?.textContent) {
-          labelText = containerLabel.textContent;
-        }
-      }
-
-      // 5. Attribute fallbacks
-      if (!labelText) {
-        labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || name;
-      }
-
-      // Clean default names for Ashby system fields
-      if (name === '_systemfield_name' || id === '_systemfield_name') {
-        labelText = labelText || 'Full name';
-      } else if (name === '_systemfield_email' || id === '_systemfield_email') {
-        labelText = labelText || 'Email';
-      } else if (name === '_systemfield_resume' || id === '_systemfield_resume') {
-        labelText = labelText || 'Resume/CV';
-      }
-
-      const cleanLabel = labelText.replace(/[*]/g, '').trim();
-
-      // Determine required
-      const isRequired =
-        inputEl.required ||
-        el.getAttribute('aria-required') === 'true' ||
-        labelText.includes('*') ||
-        Boolean(el.closest('div')?.querySelector('[aria-hidden="true"]')?.textContent?.includes('*'));
-
-      // Determine type
-      let type: FormFieldType = 'text';
-      const tag = el.tagName.toUpperCase();
-      const role = el.getAttribute('role');
-
-      if (role === 'combobox') {
-        type = 'combobox';
-      } else if (tag === 'SELECT') {
-        type = 'select';
-      } else if (tag === 'TEXTAREA') {
-        type = 'textarea';
-      } else if (inputEl.type === 'email') {
-        type = 'email';
-      } else if (inputEl.type === 'tel') {
-        type = 'tel';
-      } else if (inputEl.type === 'url') {
-        type = 'url';
-      } else if (inputEl.type === 'file') {
-        type = 'file';
-      } else if (inputEl.type === 'checkbox') {
-        type = 'checkbox';
-      } else if (inputEl.type === 'radio') {
-        type = 'radio';
-      }
-
-      // Options for selects
-      let options: string[] | undefined;
-      if (tag === 'SELECT') {
-        const selectEl = el as HTMLSelectElement;
-        options = Array.from(selectEl.options)
-          .map((opt) => opt.text.trim())
-          .filter((txt) => txt && !txt.startsWith('--'));
-      }
-
-      const isCustomQuestion = !id.startsWith('_systemfield_') && !name.startsWith('_systemfield_');
-
-      fields.push({
-        id,
-        name,
-        label: cleanLabel,
-        type,
-        element: el,
-        required: isRequired,
-        options,
-        isCustomQuestion
+    const controls = collectControls(form, doc);
+    return controls.map((control, index) => {
+      const field = describeControl(control, index, doc, {
+        idPrefix: 'ashby_field',
+        labelExtras: { idSuffixes: ['-label'] },
+        finalizeLabel: (label, c) => {
+          const name = c.element.getAttribute('name') || '';
+          const id = c.element.getAttribute('id') || '';
+          if (label) return label;
+          if (name === '_systemfield_name' || id === '_systemfield_name') return 'Full name';
+          if (name === '_systemfield_email' || id === '_systemfield_email') return 'Email';
+          if (name === '_systemfield_resume' || id === '_systemfield_resume') return 'Resume/CV';
+          return label;
+        },
+        isRequired: (c) => Boolean(c.element.closest('div')?.querySelector('[aria-hidden="true"]')?.textContent?.includes('*'))
       });
+      field.isCustomQuestion = !field.id.startsWith('_systemfield_') && !field.name.startsWith('_systemfield_');
+      return field;
     });
-
-    return fields;
   }
 
   confirmationDetected(url: URL, doc: Document): boolean {
