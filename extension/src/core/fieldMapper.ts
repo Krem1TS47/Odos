@@ -1,4 +1,5 @@
 import { CanonicalField } from './fieldSchema';
+import { escapeCss } from './dom';
 
 export interface FieldMappingResult {
   canonical?: CanonicalField;
@@ -28,54 +29,116 @@ export function normalizeLabel(text: string): string {
     .trim();
 }
 
-function safeEscapeCSS(value: string): string {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(value);
-  }
-  return value.replace(/([!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~])/g, '\\$1');
+/**
+ * Options for ATS-specific label resolution extras.
+ */
+export interface LabelResolutionExtras {
+  /** Element id suffixes/prefixes that name a label element, e.g. ['-label'] -> `${id}-label`. */
+  idSuffixes?: string[];
+  /** Container selectors to search for a label/heading when no direct label exists. */
+  containerSelectors?: string[];
+  /** Selectors tried inside the container, in order. */
+  labelSelectors?: string[];
+  /** ATS-specific attribute-driven lookup (e.g. Workday `[data-automation-id="<id>Label"]`). */
+  attributeLabel?: (el: HTMLElement, doc: Document) => string | null | undefined;
+  /** Fall back to the element's name attribute (default true). */
+  fallbackToName?: boolean;
+}
+
+const DEFAULT_CONTAINER_SELECTORS = [
+  '.field-wrapper',
+  '.field',
+  '.form-group',
+  '.input-container',
+  '.select__container',
+  '.application-question',
+  '.application-additional',
+  '.card-field',
+  '[role="group"]',
+  'fieldset'
+];
+
+const DEFAULT_LABEL_SELECTORS = [
+  'label',
+  'legend',
+  '.application-label',
+  '.card-field-name',
+  '.label',
+  'h3',
+  'h4',
+  'span.title'
+];
+
+function textOf(el: Element | null | undefined): string {
+  return (el?.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
 /**
- * Resolves visible or accessible label text for a given HTML element.
+ * Resolves the visible or accessible label text for a form control.
+ * Shared by every adapter (eng review R12). Order:
+ *  aria-label -> aria-labelledby (multi-id join) -> label[for] -> id-suffix labels ->
+ *  wrapping label -> container heading -> ATS attribute lookup -> placeholder -> name.
+ * The returned text keeps any "*" so callers can derive `required` from it.
  */
-export function getElementLabelText(el: HTMLElement): string {
-  // 1. aria-label
+export function resolveFieldLabel(el: HTMLElement, doc: Document = document, extras: LabelResolutionExtras = {}): string {
   const ariaLabel = el.getAttribute('aria-label');
   if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
 
-  // 2. aria-labelledby
   const labelledBy = el.getAttribute('aria-labelledby');
   if (labelledBy) {
-    const labelEl = document.getElementById(labelledBy);
-    if (labelEl && labelEl.textContent?.trim()) {
-      return labelEl.textContent.trim();
+    const parts = labelledBy
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((id) => textOf(doc.getElementById(id)))
+      .filter(Boolean);
+    if (parts.length > 0) return parts.join(' ');
+  }
+
+  const id = el.getAttribute('id') || '';
+  if (id) {
+    const forLabel = doc.querySelector(`label[for="${escapeCss(id)}"]`);
+    if (textOf(forLabel)) return textOf(forLabel);
+
+    const suffixes = extras.idSuffixes ?? ['-label', '_label'];
+    for (const suffix of suffixes) {
+      const candidate = doc.getElementById(`${id}${suffix}`);
+      if (textOf(candidate)) return textOf(candidate);
     }
   }
 
-  // 3. <label for="id">
-  if (el.id) {
-    const forLabel = document.querySelector(`label[for="${safeEscapeCSS(el.id)}"]`);
-    if (forLabel && forLabel.textContent?.trim()) {
-      return forLabel.textContent.trim();
-    }
-  }
-
-  // 4. Wrapping <label>
   const parentLabel = el.closest('label');
-  if (parentLabel && parentLabel.textContent?.trim()) {
-    return parentLabel.textContent.trim();
-  }
+  if (textOf(parentLabel)) return textOf(parentLabel);
 
-  // 5. Preceding label or header in parent container
-  const container = el.closest('.field, .form-group, .input-container, [role="group"]');
+  const containerSelectors = [...(extras.containerSelectors || []), ...DEFAULT_CONTAINER_SELECTORS];
+  const labelSelectors = [...(extras.labelSelectors || []), ...DEFAULT_LABEL_SELECTORS];
+  const container = el.closest(containerSelectors.join(', '));
   if (container) {
-    const heading = container.querySelector('label, .label, legend, h3, h4, span.title');
-    if (heading && heading.textContent?.trim()) {
-      return heading.textContent.trim();
+    for (const sel of labelSelectors) {
+      const candidates = Array.from(container.querySelectorAll(sel));
+      const heading = candidates.find((c) => !c.querySelector('input, select, textarea') || c === parentLabel);
+      if (textOf(heading)) return textOf(heading);
     }
   }
 
+  if (extras.attributeLabel) {
+    const attr = extras.attributeLabel(el, doc);
+    if (attr && attr.trim()) return attr.trim();
+  }
+
+  const placeholder = el.getAttribute('placeholder');
+  if (placeholder && placeholder.trim()) return placeholder.trim();
+
+  if (extras.fallbackToName !== false) {
+    return el.getAttribute('name') || '';
+  }
   return '';
+}
+
+/**
+ * Back-compat wrapper: label text without the name fallback.
+ */
+export function getElementLabelText(el: HTMLElement): string {
+  return resolveFieldLabel(el, el.ownerDocument || document, { fallbackToName: false });
 }
 
 /**
@@ -295,6 +358,21 @@ export function mapElementToCanonical(
       return { canonical: 'salary_expectation', confidence: 0.85, source: 'label', reason: 'label:salary_expectation' };
     }
 
+    // Years of experience
+    if (/(years?\s*of\s*(professional\s*|relevant\s*|work\s*)?experience|how\s*many\s*years|total\s*experience)/i.test(normLabel)) {
+      return { canonical: 'years_experience', confidence: 0.85, source: 'label', reason: 'label:years_experience' };
+    }
+
+    // Availability / earliest start date
+    if (/(earliest\s*start|start\s*date|available\s*to\s*start|when\s*(can|could)\s*you\s*start|availability\s*date|date\s*available)/i.test(normLabel)) {
+      return { canonical: 'start_date', confidence: 0.85, source: 'label', reason: 'label:start_date' };
+    }
+
+    // Notice period
+    if (/notice\s*period/i.test(normLabel)) {
+      return { canonical: 'notice_period', confidence: 0.85, source: 'label', reason: 'label:notice_period' };
+    }
+
     // Pronouns
     if (/(pronoun|preferred\s*pronoun)/i.test(normLabel)) {
       return { canonical: 'pronouns', confidence: 0.85, source: 'label', reason: 'label:pronouns' };
@@ -349,6 +427,9 @@ export function mapElementToCanonical(
     if (/(current\s*)?location/i.test(normLabel)) {
       return { canonical: 'location', confidence: 0.80, source: 'label', reason: 'label:location' };
     }
+    if (/^country(\s*\/?\s*region)?$/i.test(normLabel) || /country\s*(of\s*residence|\/\s*territory)/i.test(normLabel)) {
+      return { canonical: 'country', confidence: 0.85, source: 'label', reason: 'label:country' };
+    }
     if (/^city/i.test(normLabel)) {
       return { canonical: 'city', confidence: 0.80, source: 'label', reason: 'label:city' };
     }
@@ -357,6 +438,9 @@ export function mapElementToCanonical(
     }
     if (/(postal\s*code|zip\s*code)/i.test(normLabel)) {
       return { canonical: 'postal_code', confidence: 0.80, source: 'label', reason: 'label:postal_code' };
+    }
+    if (/(address\s*line\s*2|apartment|apt\s*\/?\s*suite|suite\s*\/?\s*unit)/i.test(normLabel)) {
+      return { canonical: 'address_line2', confidence: 0.80, source: 'label', reason: 'label:address_line2' };
     }
     if (/^address/i.test(normLabel) || /^street/i.test(normLabel)) {
       return { canonical: 'address_line1', confidence: 0.80, source: 'label', reason: 'label:address_line1' };

@@ -91,7 +91,8 @@ export function parseProfileYaml(yamlStr: string): { profile: Profile; defaultRe
     }
   }
 
-  const profile: Profile = {
+  // Assembled in the v1 shape; ProfileSchema migrates it to the current version.
+  const profile = {
     schemaVersion: 1,
     contact,
     workAuthorization,
@@ -183,15 +184,7 @@ export function parseAnswersYaml(yamlStr: string): StoredAnswer[] {
  */
 export function parseFullYamlConfig(profileYamlStr?: string, answersYamlStr?: string): ParsedYamlConfig {
   const warnings: string[] = [];
-  let profile: Profile = {
-    schemaVersion: 1,
-    contact: { fullName: '', firstName: '', lastName: '', email: '', phone: '', location: '', linkedin: '', github: '', website: '' },
-    workAuthorization: { authorizedCountries: [], requiresSponsorship: false },
-    education: [],
-    experience: [],
-    skills: [],
-    resumes: []
-  };
+  let profile: Profile = ProfileSchema.parse({});
   let defaultResumePath: string | undefined = undefined;
 
   if (profileYamlStr) {

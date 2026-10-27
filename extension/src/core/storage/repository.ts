@@ -25,11 +25,28 @@ async function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   });
 }
 
+export interface ProfileLoadStatus {
+  ok: boolean;
+  /** Human-readable reason when the stored profile could not be parsed. */
+  issue: string | null;
+  /** Schema version found in storage (undefined when nothing stored). */
+  storedVersion?: number;
+}
+
 export class StorageRepository {
   private db: OdosDatabase;
+  private profileLoadStatus: ProfileLoadStatus = { ok: true, issue: null };
 
   constructor(customDb?: OdosDatabase) {
     this.db = customDb || defaultDb;
+  }
+
+  /**
+   * Result of the most recent getProfile() parse. A failed parse never overwrites storage;
+   * the dashboard shows a banner instead of silently presenting an empty profile.
+   */
+  getProfileLoadStatus(): ProfileLoadStatus {
+    return this.profileLoadStatus;
   }
 
   // ==========================================
@@ -39,10 +56,23 @@ export class StorageRepository {
   async getProfile(): Promise<Profile> {
     const record = await this.db.profile.get('current');
     if (!record) {
+      this.profileLoadStatus = { ok: true, issue: null };
       return DEFAULT_PROFILE;
     }
     const validated = ProfileSchema.safeParse(record.profile);
-    return validated.success ? validated.data : DEFAULT_PROFILE;
+    const storedVersion = (record.profile as any)?.schemaVersion;
+    if (validated.success) {
+      this.profileLoadStatus = { ok: true, issue: null, storedVersion };
+      return validated.data;
+    }
+    const firstIssue = validated.error.issues[0];
+    this.profileLoadStatus = {
+      ok: false,
+      storedVersion,
+      issue: `Stored profile (schema v${storedVersion ?? '?'}) could not be read: ${firstIssue ? `${firstIssue.path.join('.')} ${firstIssue.message}` : 'invalid shape'}. It was left untouched; saving will overwrite it.`
+    };
+    console.warn('[Odos] Stored profile failed validation; using defaults without overwriting storage.', validated.error);
+    return DEFAULT_PROFILE;
   }
 
   async saveProfile(profile: Profile): Promise<void> {
@@ -207,6 +237,60 @@ export class StorageRepository {
 
   async deleteAnswer(id: string): Promise<void> {
     await this.db.answers.delete(id);
+  }
+
+  /**
+   * Adds a question pattern to an existing answer (deduplicated, case-insensitive).
+   */
+  async addPatternToAnswer(id: string, pattern: string): Promise<StoredAnswer | undefined> {
+    const existing = await this.db.answers.get(id);
+    if (!existing) return undefined;
+    const norm = pattern.trim().toLowerCase();
+    if (!norm) return existing;
+    if (!existing.questionPatterns.some((p) => p.trim().toLowerCase() === norm)) {
+      existing.questionPatterns = [...existing.questionPatterns, pattern.trim()];
+      await this.db.answers.put(existing);
+    }
+    return existing;
+  }
+
+  /**
+   * Learning loop entry point: remembers an answer for a question seen on a form.
+   * With `answerId`, the question becomes another pattern of that answer; otherwise a new
+   * stored answer is created (or an identical existing answer gains the pattern).
+   */
+  async rememberAnswer(input: {
+    question: string;
+    answer: string;
+    answerId?: string;
+    category?: StoredAnswerCategory;
+    autoFill?: boolean;
+  }): Promise<StoredAnswer> {
+    const question = input.question.trim();
+    const answerText = input.answer.trim();
+    if (!question || !answerText) throw new Error('Question and answer are required');
+
+    if (input.answerId) {
+      const updated = await this.addPatternToAnswer(input.answerId, question);
+      if (updated) return updated;
+    }
+
+    const all = await this.db.answers.toArray();
+    const same = all.find((a) => a.answer.trim().toLowerCase() === answerText.toLowerCase() && (!input.category || a.category === input.category));
+    if (same) {
+      const updated = await this.addPatternToAnswer(same.id, question);
+      if (updated) return updated;
+    }
+
+    const created: StoredAnswer = {
+      id: crypto.randomUUID(),
+      questionPatterns: [question],
+      category: input.category || guessAnswerCategory(question),
+      answer: answerText,
+      autoFill: input.autoFill ?? true
+    };
+    await this.db.answers.put(created);
+    return created;
   }
 
   /**
@@ -382,6 +466,18 @@ export class StorageRepository {
       }
     );
   }
+}
+
+/**
+ * Guesses a stored-answer category from the question text.
+ */
+export function guessAnswerCategory(question: string): StoredAnswerCategory {
+  const q = question.toLowerCase();
+  if (/authori[sz]|sponsor|visa|eligib|legally|work permit|citizen/.test(q)) return 'eligibility';
+  if (/gender|race|ethnic|veteran|disabilit|pronoun|sexual orientation/.test(q)) return 'demographic';
+  if (/why|motivat|interest|tell us|describe|what excites|cover letter/.test(q)) return 'motivation';
+  if (/hear about|start date|availability|notice|salary|relocat|remote|location|travel|hours|schedule|phone type/.test(q)) return 'logistics';
+  return 'other';
 }
 
 export const repository = new StorageRepository();

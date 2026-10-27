@@ -10,6 +10,10 @@
 
 import { assertNotSubmitControl } from '../content/submitGuard';
 import { Profile } from './models';
+import { waitForCondition } from './dom';
+
+/** Upper bound for a row to appear after clicking Add. */
+export const ADD_ROW_WAIT_MS = 150;
 
 export interface RepeatableSectionConfig {
   type: 'education' | 'experience' | 'website';
@@ -92,18 +96,48 @@ export function findAddButton(doc: Document, config: RepeatableSectionConfig): H
     }
   }
 
-  // 3. Document-wide button search by text regex
+  // 3. Document-wide button search by text, bounded to buttons whose nearest heading/legend
+  //    names this section (eng review R9: never click an unrelated "Add" button).
   if (config.textRegex) {
     const allButtons = Array.from(doc.querySelectorAll<HTMLElement>('button, a[role="button"], span[role="button"]'));
     for (const b of allButtons) {
       const text = (b.textContent || b.getAttribute('aria-label') || '').trim();
-      if (config.textRegex.test(text)) {
-        return b;
-      }
+      if (!config.textRegex.test(text)) continue;
+      if (nearestHeadingMatches(b, config.type)) return b;
     }
   }
 
   return null;
+}
+
+const SECTION_HEADING_WORDS: Record<RepeatableSectionConfig['type'], RegExp> = {
+  education: /education|school|academic|degree/i,
+  experience: /experience|employment|work history|job history|positions?/i,
+  website: /website|links?|urls?|social/i
+};
+
+/**
+ * True when a heading/legend/label near the button (ancestors up to 6 levels, their
+ * preceding siblings) names the section type.
+ */
+export function nearestHeadingMatches(btn: Element, type: RepeatableSectionConfig['type']): boolean {
+  const re = SECTION_HEADING_WORDS[type];
+  let node: Element | null = btn.parentElement;
+  for (let depth = 0; depth < 6 && node; depth++) {
+    const heading = node.querySelector('h1, h2, h3, h4, h5, h6, legend, [role="heading"], .section-title, .section-header');
+    if (heading && re.test(heading.textContent || '')) return true;
+    let prev = node.previousElementSibling;
+    for (let i = 0; i < 3 && prev; i++) {
+      if (/^(H[1-6]|LEGEND|LABEL|P|DIV|SPAN)$/.test(prev.tagName) && re.test(prev.textContent || '') && (prev.textContent || '').length < 120) {
+        return true;
+      }
+      prev = prev.previousElementSibling;
+    }
+    const aria = node.getAttribute('aria-label') || node.getAttribute('data-automation-id') || '';
+    if (re.test(aria)) return true;
+    node = node.parentElement;
+  }
+  return false;
 }
 
 /**
@@ -118,6 +152,13 @@ export function countExistingItems(doc: Document, config: RepeatableSectionConfi
 }
 
 /**
+ * True when the section container exists, so row counts are meaningful.
+ */
+export function isSectionCountable(doc: Document, config: RepeatableSectionConfig): boolean {
+  return doc.querySelector(config.containerSelector) !== null;
+}
+
+/**
  * Programmatically triggers the addition of dynamic repeatable blocks up to targetCount.
  * Safely clicks Add button with framework events and waits for DOM insertion.
  */
@@ -128,6 +169,10 @@ export async function triggerAdditionsForSection(
 ): Promise<number> {
   if (targetCount <= 0) return 0;
 
+  // Guard (eng review R9): without a countable container we cannot tell whether a click
+  // produced a row, so we never click.
+  if (!isSectionCountable(doc, config)) return 0;
+
   let added = 0;
   let currentCount = countExistingItems(doc, config);
 
@@ -135,21 +180,19 @@ export async function triggerAdditionsForSection(
     const btn = findAddButton(doc, config);
     if (!btn) break;
 
-    // Safety guard
     assertNotSubmitControl(btn, 'triggerAdditionsForSection');
 
-    // Simulate full click sequence
     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
     btn.click();
     added++;
 
-    // Wait 150ms for DOM reaction
-    await new Promise((r) => setTimeout(r, 150));
+    // Wait for the row to appear (bounded), instead of a fixed sleep.
+    const before = currentCount;
+    await waitForCondition(() => countExistingItems(doc, config) > before, ADD_ROW_WAIT_MS, 25);
 
     const newCount = countExistingItems(doc, config);
     if (newCount <= currentCount) {
-      // DOM didn't change, prevent infinite loop
       break;
     }
     currentCount = newCount;

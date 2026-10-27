@@ -79,7 +79,8 @@ describe('Lever Adapter & Autofill (Step 6)', () => {
           title: 'Computing Pioneer',
           startDate: '1842-01',
           endDate: 'Present',
-          summary: 'Created first computer algorithm'
+          summary: 'Created first computer algorithm',
+          isCurrent: true
         }
       ]
     };

@@ -2,6 +2,12 @@ import { FormField } from '../adapters/types';
 import { Job, Application } from '../../core/models';
 import { CaptchaDetection } from '../captcha';
 import { DetectionResult } from '../../detect';
+import { FillOutcome } from '../../core/filler';
+
+export interface ManualEdit {
+  field: FormField;
+  value: string;
+}
 
 export interface ReviewPanelOptions {
   job: Partial<Job>;
@@ -15,7 +21,21 @@ export interface ReviewPanelOptions {
   initialSnapshot?: Record<string, string>;
   isDuplicate?: boolean;
   onConfirmSubmitted: () => void;
-  onUndoPrefill?: () => void;
+  onUndoPrefill?: () => void | Promise<void>;
+  /** Fills a field from the panel (same filler as autofill); `remember` stores the answer. */
+  onFillField?: (field: FormField, value: string, remember: boolean) => Promise<FillOutcome>;
+  /** Fields the user filled by hand since discovery (offered for saving on submit). */
+  getManualEdits?: () => ManualEdit[];
+  onSaveAnswers?: (edits: ManualEdit[]) => Promise<void>;
+}
+
+function escapeHtml(text: string | undefined | null): string {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 export class ReviewPanelController {
@@ -69,6 +89,7 @@ export class ReviewPanelController {
     } = this.options;
 
     const totalFields = filledFields.length + emptyFields.length + failedFields.length;
+    const unverifiedCount = filledFields.filter((f) => f.status === 'unverified').length;
     const atsLabel = atsName || (detection?.ats ? detection.ats.toUpperCase() : 'ATS');
     const confidenceText = detection ? `${Math.round(detection.confidence * 100)}% match` : '';
     const companyName = job.company || 'Job Application';
@@ -457,6 +478,113 @@ export class ReviewPanelController {
         .btn-undo:hover {
           background: #f4f4f5;
         }
+        .field-item-unverified {
+          border-color: #fde68a;
+          background: #fffdf5;
+        }
+        .check-badge {
+          font-size: 11px;
+          font-weight: 600;
+          color: #b45309;
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          padding: 3px 7px;
+          border-radius: 5px;
+          max-width: 150px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          flex-shrink: 0;
+        }
+        .skip-badge {
+          font-size: 11px;
+          font-weight: 500;
+          color: #52525b;
+          background: #f4f4f5;
+          border: 1px solid #e4e4e7;
+          padding: 3px 7px;
+          border-radius: 5px;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .field-item-stack {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .field-row-main {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          width: 100%;
+        }
+        .inline-answer {
+          display: flex;
+          gap: 6px;
+          align-items: center;
+          margin-top: 6px;
+          width: 100%;
+        }
+        .inline-answer select,
+        .inline-answer input {
+          flex: 1;
+          min-width: 0;
+          padding: 5px 7px;
+          border: 1px solid #e4e4e7;
+          border-radius: 6px;
+          font-size: 12px;
+          font-family: inherit;
+          color: #09090b;
+          background: #ffffff;
+        }
+        .inline-answer button {
+          padding: 5px 8px;
+          border-radius: 6px;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+          border: 1px solid #09090b;
+          background: #09090b;
+          color: #fafafa;
+          white-space: nowrap;
+        }
+        .inline-answer button.secondary {
+          background: #ffffff;
+          color: #09090b;
+        }
+        .inline-answer button:disabled {
+          opacity: 0.5;
+          cursor: default;
+        }
+        .field-source {
+          font-size: 10px;
+          color: #71717a;
+          margin-left: 4px;
+        }
+        .save-offer {
+          text-align: left;
+          width: 100%;
+          max-width: 320px;
+          border: 1px solid #e4e4e7;
+          border-radius: 8px;
+          padding: 10px;
+          margin-top: 10px;
+        }
+        .save-offer label {
+          display: flex;
+          gap: 6px;
+          align-items: flex-start;
+          font-size: 12px;
+          padding: 3px 0;
+          cursor: pointer;
+        }
+        .save-offer .offer-q {
+          font-weight: 500;
+          color: #09090b;
+        }
+        .save-offer .offer-a {
+          color: #52525b;
+        }
       </style>
 
       ${
@@ -514,7 +642,7 @@ export class ReviewPanelController {
               </div>
               <div class="stat-box ${this.activeTab === 'filled' ? 'active' : ''}" id="tab-filled">
                 <div class="stat-num">${filledFields.length}</div>
-                <div class="stat-label">Filled</div>
+                <div class="stat-label">Filled${unverifiedCount > 0 ? ` · ${unverifiedCount} to check` : ''}</div>
               </div>
               <div class="stat-box ${this.activeTab === 'needs_review' ? 'active' : ''}" id="tab-review">
                 <div class="stat-num">${emptyFields.length}</div>
@@ -541,20 +669,7 @@ export class ReviewPanelController {
                   ${
                     showEmpty
                       ? emptyFields
-                          .map(
-                            (f, i) => `
-                      <li class="field-item field-item-empty" data-type="empty" data-index="${i}">
-                        <div class="field-info">
-                          <div class="field-title-row">
-                            <span class="field-title">${f.label || f.name || 'Unlabeled field'}</span>
-                            ${f.required ? '<span class="badge-required">Required</span>' : ''}
-                          </div>
-                          <span class="field-meta">Left empty for your review</span>
-                        </div>
-                        <span class="review-badge">Needs input &rarr;</span>
-                      </li>
-                    `
-                          )
+                          .map((f, i) => this.renderReviewRow(f, i, 'empty'))
                           .join('')
                       : ''
                   }
@@ -562,17 +677,19 @@ export class ReviewPanelController {
                   ${
                     showFilled
                       ? filledFields
-                          .map(
-                            (f, i) => `
+                          .map((f, i) =>
+                            f.status === 'unverified'
+                              ? this.renderReviewRow(f, i, 'filled')
+                              : `
                       <li class="field-item" data-type="filled" data-index="${i}">
                         <div class="field-info">
                           <div class="field-title-row">
-                            <span class="field-title">${f.label || f.name || 'Unlabeled field'}</span>
+                            <span class="field-title">${escapeHtml(f.label || f.name || 'Unlabeled field')}</span>
                             ${f.required ? '<span class="badge-required">Required</span>' : ''}
                           </div>
-                          <span class="field-meta">${f.canonical || 'Prefilled'}</span>
+                          <span class="field-meta">${escapeHtml(f.canonical || 'Prefilled')}${f.source === 'ai' ? '<span class="field-source">· AI</span>' : ''}</span>
                         </div>
-                        <span class="field-val-badge" title="${f.matchedValue || 'Filled'}">${f.matchedValue || 'Filled'}</span>
+                        <span class="field-val-badge" title="${escapeHtml(f.matchedValue || 'Filled')}">${escapeHtml(f.matchedValue || 'Filled')}</span>
                       </li>
                     `
                           )
@@ -667,12 +784,14 @@ export class ReviewPanelController {
         }
       });
 
-      // Jump to empty fields on click
-      const emptyElements = this.shadow.querySelectorAll('.field-item-empty');
-      emptyElements.forEach((el) => {
-        el.addEventListener('click', () => {
+      // Jump to a field on row click; inline controls stop propagation.
+      const rows = this.shadow.querySelectorAll('.field-item');
+      rows.forEach((el) => {
+        el.addEventListener('click', (e) => {
+          if ((e.target as HTMLElement).closest('.inline-answer')) return;
           const idx = Number(el.getAttribute('data-index'));
-          const field = emptyFields[idx];
+          const list = el.getAttribute('data-type') === 'empty' ? emptyFields : filledFields;
+          const field = list[idx];
           if (field?.element && typeof field.element.scrollIntoView === 'function') {
             field.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
             if (typeof field.element.focus === 'function') {
@@ -683,21 +802,127 @@ export class ReviewPanelController {
         });
       });
 
-      // Jump to filled fields on click
-      const filledElements = this.shadow.querySelectorAll('.field-item:not(.field-item-empty)');
-      filledElements.forEach((el) => {
-        el.addEventListener('click', () => {
-          const idx = Number(el.getAttribute('data-index'));
-          const field = filledFields[idx];
-          if (field?.element && typeof field.element.scrollIntoView === 'function') {
-            field.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            if (typeof field.element.focus === 'function') {
-              field.element.focus();
-            }
-            this.pulseElement(field.element);
+      // Inline Fill / Fill & remember
+      this.shadow.querySelectorAll<HTMLElement>('.inline-answer').forEach((box) => {
+        const idx = Number(box.getAttribute('data-index'));
+        const list = box.getAttribute('data-type') === 'empty' ? emptyFields : filledFields;
+        const field = list[idx];
+        const input = box.querySelector<HTMLInputElement | HTMLSelectElement>('select, input');
+        const fillBtn = box.querySelector<HTMLButtonElement>('button[data-action="fill"]');
+        const rememberBtn = box.querySelector<HTMLButtonElement>('button[data-action="remember"]');
+        const run = async (remember: boolean) => {
+          if (!field || !input || !this.options.onFillField) return;
+          const value = input.value.trim();
+          if (!value) return;
+          if (fillBtn) fillBtn.disabled = true;
+          if (rememberBtn) rememberBtn.disabled = true;
+          try {
+            const outcome = await this.options.onFillField(field, value, remember);
+            this.applyOutcome(field, outcome);
+          } finally {
+            this.updateUI();
+          }
+        };
+        fillBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          run(false);
+        });
+        rememberBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          run(true);
+        });
+        input?.addEventListener('click', (e) => e.stopPropagation());
+        input?.addEventListener('keydown', (e) => {
+          if ((e as KeyboardEvent).key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            run(false);
           }
         });
       });
+    }
+  }
+
+  /**
+   * Row for a field that needs human attention: failed/skipped (empty list) or unverified
+   * (filled list). Shows the closest candidate and an inline answer control.
+   */
+  private renderReviewRow(f: FormField, i: number, listType: 'empty' | 'filled'): string {
+    const isUnverified = f.status === 'unverified';
+    const isSkipped = f.status === 'skipped';
+    const suggestion = f.suggestion;
+    const canFill = Boolean(this.options.onFillField) && f.type !== 'file';
+
+    let meta: string;
+    if (isUnverified) {
+      meta = 'Selected, but the page did not confirm it. Check the field.';
+    } else if (isSkipped) {
+      meta = f.statusReason === 'workday_upload_requires_human' ? 'Attach your resume manually (Workday requires a human click).' : 'Skipped';
+    } else if (suggestion) {
+      meta = `closest: ${escapeHtml(suggestion.text)} (${Math.round(suggestion.score * 100)}%)`;
+    } else {
+      meta = 'Left empty for your review';
+    }
+
+    let control = '';
+    if (canFill) {
+      const preset = suggestion?.text || '';
+      if (f.options && f.options.length > 0) {
+        const opts = f.options
+          .map((o) => `<option value="${escapeHtml(o)}" ${o === preset ? 'selected' : ''}>${escapeHtml(o)}</option>`)
+          .join('');
+        control = `<select aria-label="Choose an answer">${preset ? '' : '<option value="">Choose…</option>'}${opts}</select>`;
+      } else {
+        control = `<input type="text" placeholder="Type an answer" value="${escapeHtml(preset)}" aria-label="Answer" />`;
+      }
+    }
+
+    const badge = isUnverified
+      ? `<span class="check-badge" title="${escapeHtml(f.matchedValue || '')}">Check: ${escapeHtml(f.matchedValue || '')}</span>`
+      : isSkipped
+        ? '<span class="skip-badge">Skipped</span>'
+        : '<span class="review-badge">Needs input &rarr;</span>';
+
+    return `
+      <li class="field-item ${listType === 'empty' ? 'field-item-empty' : 'field-item-unverified'} ${canFill ? 'field-item-stack' : ''}" data-type="${listType}" data-index="${i}">
+        <div class="field-row-main">
+          <div class="field-info">
+            <div class="field-title-row">
+              <span class="field-title">${escapeHtml(f.label || f.name || 'Unlabeled field')}</span>
+              ${f.required ? '<span class="badge-required">Required</span>' : ''}
+            </div>
+            <span class="field-meta">${meta}</span>
+          </div>
+          ${badge}
+        </div>
+        ${
+          canFill
+            ? `<div class="inline-answer" data-type="${listType}" data-index="${i}">
+                ${control}
+                <button type="button" data-action="fill" title="Fill this field">Fill</button>
+                <button type="button" class="secondary" data-action="remember" title="Fill and remember this answer for next time">Fill &amp; remember</button>
+              </div>`
+            : ''
+        }
+      </li>
+    `;
+  }
+
+  /**
+   * Moves a field between the review/filled lists after an inline fill.
+   */
+  private applyOutcome(field: FormField, outcome: FillOutcome): void {
+    const { filledFields, emptyFields } = this.options;
+    const removeFrom = (list: FormField[]) => {
+      const idx = list.indexOf(field);
+      if (idx >= 0) list.splice(idx, 1);
+    };
+    if (outcome.status === 'verified' || outcome.status === 'unverified') {
+      removeFrom(emptyFields);
+      if (!filledFields.includes(field)) filledFields.push(field);
+    } else {
+      removeFrom(filledFields);
+      if (!emptyFields.includes(field)) emptyFields.push(field);
     }
   }
 
@@ -718,25 +943,59 @@ export class ReviewPanelController {
   showSubmittedNotice(): void {
     if (!this.shadow) return;
     const body = this.shadow.querySelector('.odos-body');
-    if (body) {
-      body.innerHTML = `
-        <div style="padding: 24px 16px; text-align: center; color: #09090b; display: flex; flex-direction: column; align-items: center; gap: 8px;">
-          <div style="width: 36px; height: 36px; border-radius: 50%; background: #09090b; color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700;">✓</div>
-          <strong style="font-size: 14px; color: #09090b;">Application Recorded</strong>
-          <p style="font-size: 12px; color: #71717a; line-height: 1.5; max-width: 280px;">
-            Your responses and application record have been saved to your local Odos database.
-          </p>
-          <button id="btn-submitted-close" style="margin-top: 8px; background: #f4f4f5; border: 1px solid #e4e4e7; color: #09090b; padding: 7px 16px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer;">
-            Close
-          </button>
-        </div>
-      `;
+    if (!body) return;
 
-      const closeBtn = this.shadow.getElementById('btn-submitted-close');
-      closeBtn?.addEventListener('click', () => {
-        this.destroy();
-      });
-    }
+    const edits = this.options.getManualEdits ? this.options.getManualEdits() : [];
+    const offer =
+      edits.length > 0 && this.options.onSaveAnswers
+        ? `
+        <div class="save-offer" id="save-offer">
+          <div style="font-size:12px; font-weight:600; margin-bottom:4px;">Remember ${edits.length} answer${edits.length === 1 ? '' : 's'} you filled by hand?</div>
+          ${edits
+            .map(
+              (e, i) => `
+            <label><input type="checkbox" data-edit-index="${i}" checked />
+              <span><span class="offer-q">${escapeHtml(e.field.label)}</span><br/><span class="offer-a">${escapeHtml(e.value)}</span></span>
+            </label>`
+            )
+            .join('')}
+          <button id="btn-save-answers" style="margin-top:8px; background:#09090b; color:#fafafa; border:1px solid #09090b; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">Save selected</button>
+        </div>`
+        : '';
+
+    body.innerHTML = `
+      <div style="padding: 24px 16px; text-align: center; color: #09090b; display: flex; flex-direction: column; align-items: center; gap: 8px;">
+        <div style="width: 36px; height: 36px; border-radius: 50%; background: #09090b; color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700;">✓</div>
+        <strong style="font-size: 14px; color: #09090b;">Application Recorded</strong>
+        <p style="font-size: 12px; color: #71717a; line-height: 1.5; max-width: 280px;">
+          Your responses and application record have been saved to your local Odos database.
+        </p>
+        ${offer}
+        <button id="btn-submitted-close" style="margin-top: 8px; background: #f4f4f5; border: 1px solid #e4e4e7; color: #09090b; padding: 7px 16px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer;">
+          Close
+        </button>
+      </div>
+    `;
+
+    const saveBtn = this.shadow.getElementById('btn-save-answers') as HTMLButtonElement | null;
+    saveBtn?.addEventListener('click', async () => {
+      if (!this.options.onSaveAnswers || !this.shadow) return;
+      const boxes = Array.from(this.shadow.querySelectorAll<HTMLInputElement>('#save-offer input[type="checkbox"]'));
+      const selected = boxes.filter((b) => b.checked).map((b) => edits[Number(b.getAttribute('data-edit-index'))]).filter(Boolean);
+      saveBtn.disabled = true;
+      try {
+        await this.options.onSaveAnswers(selected);
+        saveBtn.textContent = `Saved ${selected.length}`;
+      } catch {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Retry save';
+      }
+    });
+
+    const closeBtn = this.shadow.getElementById('btn-submitted-close');
+    closeBtn?.addEventListener('click', () => {
+      this.destroy();
+    });
   }
 
   private pulseElement(el: HTMLElement): void {

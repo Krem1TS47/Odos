@@ -1,14 +1,8 @@
-import { AtsAdapter, FormField, FormFieldType } from './types';
-import { Job } from '../../core/models';
-import { isSubmitControl } from '../submitGuard';
-import { detectPageCaptcha, CaptchaDetection } from '../captcha';
+import { AtsAdapter, FormField } from './types';
+import { collectControls, describeControl } from '../../core/controlClassifier';
 
-function escapeCss(str: string): string {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(str);
-  }
-  return str.replace(/([!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~])/g, '\\$1');
-}
+import { Job } from '../../core/models';
+import { detectPageCaptcha, CaptchaDetection } from '../captcha';
 
 export class LeverAdapter implements AtsAdapter {
   id = 'lever';
@@ -106,133 +100,38 @@ export class LeverAdapter implements AtsAdapter {
 
     if (!form) return [];
 
-    const elements = form.querySelectorAll<HTMLElement>(
-      'input, select, textarea'
-    );
+    const friendly: Record<string, string> = {
+      name: 'Full name',
+      email: 'Email',
+      phone: 'Phone',
+      org: 'Current company',
+      location: 'Current location',
+      'urls[LinkedIn]': 'LinkedIn URL',
+      'urls[GitHub]': 'GitHub URL',
+      'urls[Portfolio]': 'Portfolio URL',
+      'urls[Other]': 'Other website',
+      comments: 'Additional information',
+      resume: 'Resume/CV'
+    };
 
-    const fields: FormField[] = [];
-    const seenElements = new Set<HTMLElement>();
-
-    elements.forEach((el, index) => {
-      if (seenElements.has(el)) return;
-      seenElements.add(el);
-
-      const inputEl = el as HTMLInputElement;
-
-      // Ignore hidden inputs, submit controls, and buttons
-      if (inputEl.type === 'hidden' || isSubmitControl(el)) return;
-      if (el.tagName === 'BUTTON') return;
-
-      const name = el.getAttribute('name') || '';
-      const id = el.getAttribute('id') || `lever_field_${index}`;
-
-      // Extract label
-      let labelText = '';
-
-      // 1. label[for="id"]
-      if (id && id !== `lever_field_${index}`) {
-        const labelEl = doc.querySelector(`label[for="${escapeCss(id)}"]`);
-        if (labelEl?.textContent) {
-          labelText = labelEl.textContent;
-        }
-      }
-
-      // 2. Parent label or closest wrapping question container
-      if (!labelText) {
-        const parentLabel = el.closest('label');
-        if (parentLabel?.textContent) {
-          labelText = parentLabel.textContent;
-        }
-      }
-
-      // 3. Lever structure: .application-question, .application-additional
-      if (!labelText) {
-        const questionContainer = el.closest(
-          '.application-question, .application-additional, .card-field, .form-group'
-        );
-        const textLabel = questionContainer?.querySelector(
-          '.application-label, .text, label, h4, .card-field-name'
-        );
-        if (textLabel?.textContent) {
-          labelText = textLabel.textContent;
-        }
-      }
-
-      // 4. Attribute fallbacks
-      if (!labelText) {
-        labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || name;
-      }
-
-      // If the field is one of Lever's standard fields, provide clean default label
-      if (!labelText || labelText === name) {
-        if (name === 'name') labelText = 'Full name';
-        else if (name === 'email') labelText = 'Email';
-        else if (name === 'phone') labelText = 'Phone';
-        else if (name === 'org') labelText = 'Current company';
-        else if (name === 'location') labelText = 'Current location';
-        else if (name === 'urls[LinkedIn]') labelText = 'LinkedIn URL';
-        else if (name === 'urls[GitHub]') labelText = 'GitHub URL';
-        else if (name === 'urls[Portfolio]') labelText = 'Portfolio URL';
-        else if (name === 'urls[Other]') labelText = 'Other website';
-        else if (name === 'comments') labelText = 'Additional information';
-        else if (name === 'resume') labelText = 'Resume/CV';
-      }
-
-      const cleanLabel = labelText.replace(/[*]/g, '').trim();
-
-      // Determine required
-      const isRequired =
-        inputEl.required ||
-        el.getAttribute('aria-required') === 'true' ||
-        labelText.includes('*') ||
-        Boolean(el.closest('.application-question, .card-field')?.querySelector('.required, [data-qa="required"]'));
-
-      // Determine type
-      let type: FormFieldType = 'text';
-      const tag = el.tagName.toUpperCase();
-
-      if (tag === 'SELECT') {
-        type = 'select';
-      } else if (tag === 'TEXTAREA') {
-        type = 'textarea';
-      } else if (inputEl.type === 'email') {
-        type = 'email';
-      } else if (inputEl.type === 'tel') {
-        type = 'tel';
-      } else if (inputEl.type === 'url') {
-        type = 'url';
-      } else if (inputEl.type === 'file') {
-        type = 'file';
-      } else if (inputEl.type === 'checkbox') {
-        type = 'checkbox';
-      } else if (inputEl.type === 'radio') {
-        type = 'radio';
-      }
-
-      // Options for selects
-      let options: string[] | undefined;
-      if (tag === 'SELECT') {
-        const selectEl = el as HTMLSelectElement;
-        options = Array.from(selectEl.options)
-          .map((opt) => opt.text.trim())
-          .filter((txt) => txt && !txt.startsWith('--'));
-      }
-
-      const isCustomQuestion = name.startsWith('cards[') || name.startsWith('custom_');
-
-      fields.push({
-        id,
-        name,
-        label: cleanLabel,
-        type,
-        element: el,
-        required: isRequired,
-        options,
-        isCustomQuestion
+    const controls = collectControls(form, doc);
+    return controls.map((control, index) => {
+      const field = describeControl(control, index, doc, {
+        idPrefix: 'lever_field',
+        labelExtras: {
+          containerSelectors: ['.application-question', '.application-additional', '.card-field', '.form-group'],
+          labelSelectors: ['.application-label', '.text', 'label', 'h4', '.card-field-name']
+        },
+        finalizeLabel: (label, c) => {
+          const name = c.element.getAttribute('name') || '';
+          if ((!label || label === name) && friendly[name]) return friendly[name];
+          return label;
+        },
+        isRequired: (c) => Boolean(c.element.closest('.application-question, .card-field')?.querySelector('.required, [data-qa="required"]'))
       });
+      field.isCustomQuestion = field.name.startsWith('cards[') || field.name.startsWith('custom_');
+      return field;
     });
-
-    return fields;
   }
 
   confirmationDetected(url: URL, doc: Document): boolean {
