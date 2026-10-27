@@ -64,7 +64,9 @@ export const CONTROL_SELECTOR = [
   '[data-automation-id="dropdownWidget"]',
   '[data-automation-id="searchWidget"]',
   '[data-automation-id="selectWidget"]',
-  '[data-automation-id="multiselectInputContainer"]'
+  '[data-automation-id="multiselectInputContainer"]',
+  '[data-automation-id="multiSelectContainer"]',
+  'input[data-automation-id="searchBox"]'
 ].join(', ');
 
 const LIBRARY_WRAPPER_CLASSES = [
@@ -86,7 +88,8 @@ const WORKDAY_WRAPPER_IDS = new Set([
   'dropdownWidget',
   'searchWidget',
   'selectWidget',
-  'multiselectInputContainer'
+  'multiselectInputContainer',
+  'multiSelectContainer'
 ]);
 
 /** Inputs that libraries render only for form submission / a11y and must never be typed into. */
@@ -111,6 +114,7 @@ export function hasComboboxSignals(el: Element): boolean {
   if (hasClass(el, LIBRARY_WRAPPER_CLASSES)) return true;
   const autoId = el.getAttribute('data-automation-id');
   if (autoId && WORKDAY_WRAPPER_IDS.has(autoId)) return true;
+  if (autoId === 'searchBox') return true;
   return false;
 }
 
@@ -180,6 +184,7 @@ export function classifyControl(el: HTMLElement, doc: Document = document): Clas
 
   if (tag === 'INPUT' && inputType === 'hidden') return null;
   if (isSubmitControl(el)) return null;
+  if (el.closest('[data-automation-id="selectedItemList"], [data-automation-id="selectedItem"]')) return null;
   if (el.getAttribute('aria-hidden') === 'true' && tag !== 'SELECT') return null;
   if (hasClass(el, HIDDEN_LIBRARY_INPUT_CLASSES)) return null;
 

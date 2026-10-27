@@ -14,14 +14,8 @@
 
 import { assertNotSubmitControl } from '../content/submitGuard';
 import { DropdownVariant, FillStatus, FillSuggestion, FormField } from '../content/adapters/types';
-import {
-  isElementVisible,
-  resolveIdRefs,
-  startAddedNodeRecorder,
-  waitForCondition,
-  waitForElement
-} from './dom';
-import { MatchResult, OptionCandidate, normalizeOptionText, resolveOption } from './dropdownResolver';
+import { isElementVisible, resolveIdRefs, startAddedNodeRecorder, waitForCondition } from './dom';
+import { MatchResult, OptionCandidate, OptionResolution, normalizeOptionText, resolveOption } from './dropdownResolver';
 
 export interface FillOutcome {
   status: FillStatus;
@@ -36,8 +30,6 @@ export interface FillOutcome {
   match?: MatchResult;
 }
 
-/** Maximum wait for a combobox popup to show options (R15). */
-export const COMBOBOX_WAIT_MS = 800;
 /** Extra wait after the keyboard fallback (R15). */
 export const COMBOBOX_RETRY_MS = 400;
 /** Settle window for a widget to reflect a selection. */
@@ -45,6 +37,8 @@ export const SETTLE_MS = 150;
 
 export const OPTION_SELECTOR = [
   '[role="option"]',
+  '[data-automation-id="menuItem"]',
+  '[data-automation-id="promptLeafNode"]',
   'li[data-value]',
   '.option',
   '.select__option',
@@ -64,7 +58,6 @@ export const OPTION_SELECTOR = [
 const CREATE_BUTTON_SELECTOR =
   '[data-automation-id="createOption"], button.select__add-option, button.create-option, [role="button"][data-action="add"]';
 
-const LISTBOX_SELECTOR = '[role="listbox"], [role="menu"], .select__menu, .select2-results, .ant-select-dropdown, .MuiPopover-paper, .MuiAutocomplete-popper, [data-radix-popper-content-wrapper], .choices__list--dropdown';
 
 function suggestionFrom(match: MatchResult | null | undefined): FillSuggestion | undefined {
   if (!match) return undefined;
@@ -392,6 +385,22 @@ export function fillCheckboxGroup(
 
 // ---------------------------------------------------------------------------
 // Custom comboboxes
+//
+// Root causes this driver is built around (verified against react-select's source and
+// live-traced Workday automation):
+//  1. Typing must NOT blur the search input. react-select's onInputBlur clears the input
+//     and closes the menu; Workday's multi-select closes its list on blur. The old typing
+//     path ended with blur(), so options vanished and the typed text stayed behind.
+//  2. Workday catalogue prompts (School, Field of Study, Skills, Source) open a DEFAULT
+//     browse list and search only on Enter. Rows of the default list are not answers:
+//     clicking one selects nothing. Results arrive from the server, so reads poll until
+//     the list answers the query and holds still.
+//  3. Pill lists ([data-automation-id="selectedItemList"]) are role="listbox" and always
+//     visible, so "any listbox on the page" picks the neighbouring field's chosen values.
+//     The popup must be attributed: aria-controls, the one list that appeared after the
+//     click, or a list inside the same field wrapper. Nothing wider.
+//  4. Workday keeps a pick only once focus leaves the field, and an Escape sent with no
+//     popup open cancels the answer that was just given.
 // ---------------------------------------------------------------------------
 
 export interface ComboboxFillOptions {
@@ -405,12 +414,76 @@ export interface ComboboxFillOptions {
   doc?: Document;
 }
 
+/** How long a popup may take to open after the click. */
+export const POPUP_OPEN_WAIT_MS = 800;
+/** How long typed text may take to produce results (client-side filter or server search). */
+export const TYPED_RESULTS_WAIT_MS = 1200;
+/** How long an Enter-triggered server search may take to answer. */
+export const ENTER_RESULTS_WAIT_MS = 2500;
+/** How long the widget may take to reflect a click. */
+export const SELECTION_VERIFY_MS = 1000;
+/** A result list is "settled" when it has not changed for this long. */
+export const LIST_SETTLE_MS = 400;
+
+const POPUP_SELECTOR =
+  '[role="listbox"], [role="menu"], [data-automation-id="promptOptions"], .select__menu, .select2-results, .ant-select-dropdown, .MuiPopover-paper, .MuiAutocomplete-popper, [data-radix-popper-content-wrapper], .choices__list--dropdown';
+
+const PILL_LIST_SELECTOR = '[data-automation-id="selectedItemList"], [data-automation-id="selectedItem"]';
+const FIELD_WRAPPER_SELECTOR = '[data-automation-id^="formField-"], .select__container, .select-shell, .field, .form-group, .ant-select, .MuiFormControl-root, .application-question';
+const NON_OPTION_TEXT = /^(loading|loading\.\.\.|searching|searching\.\.\.|no options|no results|no matches( found)?|no items|type to search|start typing|select one)$/i;
+const LOADING_SELECTOR = '.select__loading-indicator, .select__menu-notice--loading, [aria-busy="true"], [data-automation-id="loadingIndicator"]';
+
 function cleanText(s: string | null | undefined): string {
   return (s || '').replace(/\s+/g, ' ').trim();
 }
 
-const DISPLAY_VALUE_SELECTOR =
-  '.select__single-value, [class*="single-value"], [class*="singleValue"], .select2-selection__rendered, .ant-select-selection-item, [data-automation-id="selectedItem"], [data-automation-id="selectedItemLabel"], .MuiSelect-select, [class*="selected-value"], [class*="selectedValue"]';
+function isPillListNode(el: Element): boolean {
+  return Boolean(el.closest(PILL_LIST_SELECTOR));
+}
+
+function hasLayout(el: Element): boolean {
+  // jsdom has no layout; treat as laid out unless hidden by attributes/styles.
+  return isElementVisible(el);
+}
+
+/** An option row's own label (Workday puts it on data-automation-label; charms pollute textContent). */
+export function optionLabelText(el: Element): string {
+  const node = el.matches('[data-automation-id="promptOption"]') ? el : el.querySelector('[data-automation-id="promptOption"]');
+  const label = node?.getAttribute('data-automation-label');
+  if (label) return cleanText(label);
+  const aria = el.getAttribute('aria-label');
+  if (aria && !el.textContent?.trim()) return cleanText(aria);
+  return cleanText(el.textContent);
+}
+
+/**
+ * Real, selectable option rows inside a popup: deduped to the outermost row (Workday nests
+ * promptOption inside menuItem[role=option]), visible, not placeholders or notices, and
+ * never pills of an already-chosen value.
+ */
+export function collectOptions(root: ParentNode): HTMLElement[] {
+  const rows = new Set<HTMLElement>();
+  const els = Array.from(root.querySelectorAll<HTMLElement>(OPTION_SELECTOR));
+  if (root instanceof Element && root.matches(OPTION_SELECTOR)) els.unshift(root as HTMLElement);
+  for (const el of els) {
+    if (isPillListNode(el)) continue;
+    if (!hasLayout(el)) continue;
+    const row = (el.closest('[role="option"], [data-automation-id="menuItem"]') as HTMLElement | null) || el;
+    const text = optionLabelText(row);
+    if (!text || NON_OPTION_TEXT.test(text)) continue;
+    if (row.getAttribute('aria-disabled') === 'true') continue;
+    rows.add(row);
+  }
+  return Array.from(rows);
+}
+
+function isLoading(root: ParentNode): boolean {
+  if (root.querySelector(LOADING_SELECTOR)) return true;
+  const notice = Array.from(root.querySelectorAll<HTMLElement>('[role="option"], .select__menu-notice, [data-automation-id="promptOption"], li, p, div'))
+    .slice(0, 20)
+    .some((n) => n.children.length === 0 && /^(loading|searching)/i.test(cleanText(n.textContent)));
+  return notice;
+}
 
 /**
  * Reads what a dropdown control currently shows to the user.
@@ -428,77 +501,8 @@ export function readDisplayedValue(control: HTMLElement, trigger?: HTMLElement |
   return cleanText((trigger || control).textContent);
 }
 
-function pointerSequence(el: Element): void {
-  const init = { bubbles: true, cancelable: true, composed: true } as MouseEventInit;
-  el.dispatchEvent(new MouseEvent('pointerdown', init));
-  el.dispatchEvent(new MouseEvent('mousedown', init));
-  el.dispatchEvent(new MouseEvent('pointerup', init));
-  el.dispatchEvent(new MouseEvent('mouseup', init));
-  (el as HTMLElement).click();
-}
-
-function keydown(el: Element, key: string, code = key): void {
-  el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, code }));
-  el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key, code }));
-}
-
-function visibleOptions(root: ParentNode): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(OPTION_SELECTOR)).filter((o) => isElementVisible(o));
-}
-
-/**
- * Resolves the option pool for an open combobox (eng review R10), in order:
- * linked listbox (aria-controls/owns/activedescendant) -> nodes that appeared after the
- * open click -> classifier-provided optionSource -> visible options anywhere.
- */
-export async function resolveOptionPool(
-  control: HTMLElement,
-  trigger: HTMLElement | null | undefined,
-  recorder: { peek(): Element[] },
-  optionSource: Element | null | undefined,
-  doc: Document,
-  waitMs: number
-): Promise<{ options: HTMLElement[]; root: ParentNode; strategy: string }> {
-  const linked: Element[] = [];
-  for (const node of [control, trigger].filter(Boolean) as Element[]) {
-    linked.push(...resolveIdRefs(node, 'aria-controls', doc), ...resolveIdRefs(node, 'aria-owns', doc));
-    const active = resolveIdRefs(node, 'aria-activedescendant', doc)[0];
-    if (active?.parentElement) linked.push(active.parentElement);
-  }
-  const linkedRoot = linked.find((l) => l !== control && l !== trigger);
-  if (linkedRoot) {
-    await waitForElement(OPTION_SELECTOR, waitMs, linkedRoot);
-    const options = visibleOptions(linkedRoot);
-    if (options.length > 0) return { options, root: linkedRoot, strategy: 'aria_linked' };
-  }
-
-  const appeared = await waitForElement(OPTION_SELECTOR, waitMs, doc);
-  const added = recorder.peek();
-  if (added.length > 0) {
-    const roots: Element[] = [];
-    for (const node of added) {
-      if (!node.isConnected) continue;
-      if (node.matches(LISTBOX_SELECTOR) || node.querySelector(LISTBOX_SELECTOR) || node.matches(OPTION_SELECTOR) || node.querySelector(OPTION_SELECTOR)) {
-        roots.push(node);
-      }
-    }
-    const dedup = roots.filter((r) => !roots.some((other) => other !== r && other.contains(r)));
-    const options: HTMLElement[] = [];
-    for (const r of dedup) {
-      if (r.matches(OPTION_SELECTOR) && isElementVisible(r)) options.push(r as HTMLElement);
-      options.push(...visibleOptions(r));
-    }
-    if (options.length > 0) return { options: Array.from(new Set(options)), root: dedup[0] || doc, strategy: 'appeared_after_click' };
-  }
-
-  if (optionSource && optionSource.isConnected) {
-    const options = visibleOptions(optionSource);
-    if (options.length > 0) return { options, root: optionSource, strategy: 'option_source' };
-  }
-
-  const all = appeared ? visibleOptions(doc) : visibleOptions(doc);
-  return { options: all, root: doc, strategy: 'document_visible' };
-}
+const DISPLAY_VALUE_SELECTOR =
+  '.select__single-value, [class*="single-value"], [class*="singleValue"], .select2-selection__rendered, .ant-select-selection-item, [data-automation-id="selectedItem"], [data-automation-id="selectedItemLabel"], .MuiSelect-select, [class*="selected-value"], [class*="selectedValue"]';
 
 function findDisplayElement(control: HTMLElement, trigger?: HTMLElement | null): HTMLElement | null {
   const scope = trigger && trigger !== control ? trigger : control.parentElement || control;
@@ -506,14 +510,229 @@ function findDisplayElement(control: HTMLElement, trigger?: HTMLElement | null):
   return display && display !== control ? display : null;
 }
 
+function fieldWrapperOf(el: Element): Element | null {
+  return el.closest(FIELD_WRAPPER_SELECTOR);
+}
+
+/** Texts of selected pills inside the field wrapper (Workday multi-select). */
+function pillTexts(control: HTMLElement, trigger?: HTMLElement | null): string[] {
+  const wrap = fieldWrapperOf(trigger || control) || (trigger || control).parentElement;
+  if (!wrap) return [];
+  return Array.from(wrap.querySelectorAll<HTMLElement>('[data-automation-id="selectedItem"], .select__multi-value__label, .ant-select-selection-item'))
+    .map((p) => optionLabelText(p))
+    .filter(Boolean);
+}
+
+function mouseLike(type: string, el: Element): Event {
+  let x = 0;
+  let y = 0;
+  try {
+    const r = el.getBoundingClientRect();
+    x = r.left + r.width / 2;
+    y = r.top + r.height / 2;
+  } catch {}
+  const init: PointerEventInit = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0, buttons: type.endsWith('down') ? 1 : 0, pointerId: 1, pointerType: 'mouse' } as PointerEventInit;
+  if (type.startsWith('pointer') && typeof PointerEvent === 'function') return new PointerEvent(type, init);
+  return new MouseEvent(type, init);
+}
+
+/** A full pointer sequence at the element's centre, the way a user clicks. */
+export function pointerClick(el: Element): void {
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+    el.dispatchEvent(mouseLike(type, el));
+  }
+  (el as HTMLElement).click();
+}
+
+function keydown(el: Element, key: string, code = key): void {
+  const keyCode = key === 'Enter' ? 13 : key === 'Escape' ? 27 : key === 'ArrowDown' ? 40 : key === 'Tab' ? 9 : 0;
+  const init: KeyboardEventInit = { bubbles: true, cancelable: true, key, code, keyCode, which: keyCode } as KeyboardEventInit;
+  el.dispatchEvent(new KeyboardEvent('keydown', init));
+  if (key === 'Enter') el.dispatchEvent(new KeyboardEvent('keypress', init));
+  el.dispatchEvent(new KeyboardEvent('keyup', init));
+}
+
+/**
+ * Types a search query into a combobox input WITHOUT blurring or firing change: focus,
+ * prototype setter, beforeinput/input. This is the whole difference between a menu that
+ * shows results and one that closes with the text left behind.
+ */
+export function typeIntoSearchInput(input: HTMLInputElement, text: string): void {
+  assertNotSubmitControl(input, 'typeIntoSearchInput');
+  try {
+    input.focus();
+  } catch {}
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  if (descriptor && descriptor.set) descriptor.set.call(input, text);
+  else input.value = text;
+  try {
+    input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: text }));
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: text }));
+  } catch {
+    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+  }
+}
+
+function visiblePopups(doc: Document): Element[] {
+  return Array.from(doc.querySelectorAll(POPUP_SELECTOR)).filter((p) => hasLayout(p) && !isPillListNode(p));
+}
+
+/**
+ * Attributes a popup to the control that opened it (eng review R10, tightened):
+ *  1. aria-controls / aria-owns / aria-activedescendant's list (authoritative when set)
+ *  2. exactly one popup (or option-bearing node) that appeared since the open click
+ *  3. the classifier's optionSource
+ *  4. a popup inside the same field wrapper
+ *  5. the single visible popup on the page, only when there is exactly one
+ * Never "any listbox": pill lists and neighbouring fields are always on screen.
+ */
+export function findOwnedPopup(
+  control: HTMLElement,
+  trigger: HTMLElement | null | undefined,
+  before: Set<Element>,
+  recorder: { peek(): Element[] },
+  optionSource: Element | null | undefined,
+  doc: Document
+): Element | null {
+  for (const node of [control, trigger].filter(Boolean) as Element[]) {
+    const refs = [...resolveIdRefs(node, 'aria-controls', doc), ...resolveIdRefs(node, 'aria-owns', doc)];
+    const active = resolveIdRefs(node, 'aria-activedescendant', doc)[0];
+    if (active?.parentElement) refs.push(active.closest(POPUP_SELECTOR) || active.parentElement);
+    for (const r of refs) {
+      if (r !== control && r !== trigger && hasLayout(r) && !isPillListNode(r)) return r;
+    }
+  }
+
+  const appeared = visiblePopups(doc).filter((p) => !before.has(p));
+  if (appeared.length === 1) return appeared[0];
+  if (appeared.length > 1) {
+    // Prefer the one holding options; if still ambiguous, the first that appeared.
+    const withOptions = appeared.filter((p) => collectOptions(p).length > 0);
+    if (withOptions.length >= 1) return withOptions[0];
+  }
+
+  const added = recorder.peek().filter((n) => n.isConnected && !isPillListNode(n));
+  const addedRoots = added.filter((n) => n.matches(POPUP_SELECTOR) || n.querySelector(POPUP_SELECTOR) || n.matches(OPTION_SELECTOR) || n.querySelector(OPTION_SELECTOR));
+  const outer = addedRoots.filter((r) => !addedRoots.some((o) => o !== r && o.contains(r)));
+  if (outer.length >= 1) {
+    const popup = outer[0].matches(POPUP_SELECTOR) ? outer[0] : outer[0].querySelector(POPUP_SELECTOR) || outer[0];
+    return popup;
+  }
+
+  if (optionSource && optionSource.isConnected && hasLayout(optionSource) && !isPillListNode(optionSource)) return optionSource;
+
+  const wrap = fieldWrapperOf(trigger || control);
+  if (wrap) {
+    for (const scope of [wrap, wrap.parentElement].filter(Boolean) as Element[]) {
+      const own = Array.from(scope.querySelectorAll(POPUP_SELECTOR)).filter((p) => hasLayout(p) && !isPillListNode(p));
+      if (own.length > 0) return own[0];
+    }
+  }
+
+  const all = visiblePopups(doc).filter((p) => collectOptions(p).length > 0);
+  if (all.length === 1) return all[0];
+  return null;
+}
+
+function queryWords(query: string): string[] {
+  const all = normalizeOptionText(query).split(' ').filter(Boolean);
+  const long = all.filter((w) => w.length >= 3 && !/^(and|the|for|of)$/.test(w));
+  return long.length ? long : all;
+}
+
+/** Do these rows answer the query (vs. a default browse list)? */
+function answersQuery(texts: string[], query: string, baseline: string | null): boolean {
+  if (texts.length === 0) return false;
+  if (baseline !== null && texts.join('\n') !== baseline) return true;
+  const words = queryWords(query);
+  if (words.length === 0) return false;
+  // A row is relevant when it carries at least half of the query's words. Requiring only one
+  // word let a default browse list of universities pass as results for "University of X".
+  const needed = Math.ceil(words.length / 2);
+  const relevant = texts.filter((t) => {
+    const norm = normalizeOptionText(t);
+    return words.filter((w) => norm.includes(w)).length >= needed;
+  }).length;
+  return relevant / texts.length >= 0.5;
+}
+
+interface ReadResult {
+  popup: Element | null;
+  options: HTMLElement[];
+  texts: string[];
+  resolution: OptionResolution | null;
+  answered: boolean;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Polls the owned popup until it shows a floor-clearing match, or its rows answer the query
+ * and hold still, or the deadline passes.
+ */
+async function readOptions(
+  ctx: {
+    control: HTMLElement;
+    trigger: HTMLElement | null;
+    before: Set<Element>;
+    recorder: { peek(): Element[] };
+    optionSource: Element | null | undefined;
+    doc: Document;
+    desired: string;
+    hint?: string;
+    typed: boolean;
+    baseline: string | null;
+  },
+  deadlineMs: number
+): Promise<ReadResult> {
+  const deadline = Date.now() + deadlineMs;
+  let last: string | null = null;
+  let steadySince = Date.now();
+  let lastResult: ReadResult = { popup: null, options: [], texts: [], resolution: null, answered: false };
+  for (;;) {
+    const popup = findOwnedPopup(ctx.control, ctx.trigger, ctx.before, ctx.recorder, ctx.optionSource, ctx.doc);
+    const loading = popup ? isLoading(popup) : false;
+    const options = popup && !loading ? collectOptions(popup) : [];
+    const texts = options.map(optionLabelText);
+    const searched = !ctx.typed || answersQuery(texts, ctx.desired, ctx.baseline);
+    const candidates: OptionCandidate[] = options.map((opt, idx) => ({
+      text: texts[idx],
+      value: opt.getAttribute('data-value') || opt.getAttribute('value') || opt.getAttribute('data-automation-label') || '',
+      index: idx,
+      element: opt
+    }));
+    const resolution = candidates.length > 0 ? resolveOption(candidates, ctx.desired, ctx.hint) : null;
+    lastResult = { popup, options, texts, resolution, answered: searched && options.length > 0 };
+    if (searched && resolution?.selected) return lastResult;
+
+    const key = texts.join('\n');
+    if (key !== last) {
+      last = key;
+      steadySince = Date.now();
+    }
+    const settled = searched && options.length > 0 && Date.now() - steadySince >= LIST_SETTLE_MS;
+    if (settled || Date.now() >= deadline) return lastResult;
+    await sleep(100);
+  }
+}
+
 function isSelectionReflected(
   control: HTMLElement,
   trigger: HTMLElement | null | undefined,
   option: HTMLElement,
   optionText: string,
-  pre: { displayed: string; ariaSelected: string | null; typed: string }
+  pre: { displayed: string; ariaSelected: string | null; typed: string; pills: string[] }
 ): boolean {
   const normOpt = normalizeOptionText(optionText);
+
+  // Workday multi-select: a new pill carrying the option text
+  const pillsNow = pillTexts(control, trigger);
+  if (pillsNow.length > pre.pills.length && pillsNow.some((p) => normalizeOptionText(p) === normOpt || normalizeOptionText(p).includes(normOpt))) {
+    return true;
+  }
+
   const displayed = readDisplayedValue(control, trigger);
   const normDisplayed = normalizeOptionText(displayed);
   // When the only "display" is the search input itself, the typed text is not evidence.
@@ -526,13 +745,15 @@ function isSelectionReflected(
   ) {
     return true;
   }
-  if (option.isConnected && option.getAttribute('aria-selected') === 'true' && pre.ariaSelected !== 'true') return true;
+  if (option.isConnected && option.getAttribute('aria-selected') === 'true' && pre.ariaSelected !== 'true' && option.getAttribute('data-automation-checked') !== null) {
+    return true;
+  }
+  if (option.isConnected && option.getAttribute('data-automation-checked') === 'Checked') return true;
   const scope = trigger && trigger !== control ? trigger : control.parentElement;
   const hidden = scope?.querySelector<HTMLInputElement>('input[type="hidden"]');
   if (hidden && hidden.value && normalizeOptionText(hidden.value) === normalizeOptionText(option.getAttribute('data-value') || option.getAttribute('value') || optionText)) {
     return true;
   }
-  // The input holding the option text only counts when it is not simply what we typed.
   if (
     control instanceof HTMLInputElement &&
     normalizeOptionText(control.value) === normOpt &&
@@ -559,6 +780,16 @@ function fillDatalist(input: HTMLInputElement, desired: string, hintCategory?: s
   return { ...outcome, reason: 'datalist_free_text' };
 }
 
+/** Close an open popup the way a person would; never send Escape when nothing is open. */
+async function closePopupIfOpen(doc: Document, focusTarget: Element | null): Promise<void> {
+  if (visiblePopups(doc).length === 0) return;
+  if (focusTarget) keydown(focusTarget, 'Escape');
+  keydown(doc.body, 'Escape');
+  await sleep(120);
+  if (visiblePopups(doc).length === 0) return;
+  pointerClick(doc.body);
+}
+
 /**
  * Drives a custom combobox/listbox widget under the verified-fill contract.
  */
@@ -583,95 +814,140 @@ export async function fillCombobox(opts: ComboboxFillOptions): Promise<FillOutco
     search: searchInput ? searchInput.value : '',
     displayed: readDisplayedValue(element, trigger),
     ariaSelected: null as string | null,
-    typed: ''
+    typed: '',
+    pills: pillTexts(element, trigger)
   };
 
-  const restore = () => {
-    if (searchInput && searchInput.value !== pre.search) {
-      setNativeValue(searchInput, pre.search);
-    }
-    keydown(searchInput || element, 'Escape');
-  };
+  // Idempotent: already showing the wanted value.
+  if (pre.displayed && normalizeOptionText(pre.displayed) === normalizeOptionText(desired)) {
+    return { status: 'verified', value: desired, displayed: pre.displayed, reason: 'already_selected' };
+  }
 
-  // 1. Open the popup
+  const before = new Set(visiblePopups(doc));
   const recorder = startAddedNodeRecorder(doc);
-  try {
-    if (typeof element.focus === 'function') element.focus();
-    pointerSequence(trigger || element);
-    if (trigger && searchInput && typeof searchInput.focus === 'function') searchInput.focus();
+  const ctxBase = { control: element, trigger, before, recorder, optionSource: opts.optionSource, doc, desired, hint: hintCategory };
 
-    // 2. Type to filter
-    if (searchInput && desired) {
-      setNativeValue(searchInput, desired);
-      pre.typed = desired;
-      keydown(searchInput, 'ArrowDown');
+  const clearTypedQuery = () => {
+    if (searchInput && pre.typed && searchInput.value === pre.typed) {
+      typeIntoSearchInput(searchInput, pre.search);
+    }
+  };
+
+  try {
+    try {
+      (trigger || element).scrollIntoView?.({ block: 'center' });
+    } catch {}
+
+    // 1. Open: pointer sequence on the trigger (react-select opens on control mousedown once
+    //    the input is focused), then focus the search input.
+    pointerClick(trigger || element);
+    if (searchInput) {
+      try {
+        searchInput.focus();
+      } catch {}
+      // Click the search box itself as a person would: Workday opens its browse list on that
+      // click, and react-select ignores a mousedown on its own input while the menu is open.
+      if (searchInput !== (trigger || element)) pointerClick(searchInput);
+      if (!trigger) searchInput.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
     }
 
-    // 3. Collect the option pool
-    const pool = await resolveOptionPool(element, trigger, recorder, opts.optionSource, doc, COMBOBOX_WAIT_MS);
-    const candidates: OptionCandidate[] = pool.options.map((opt, idx) => ({
-      text: opt.textContent || '',
-      value: opt.getAttribute('data-value') || opt.getAttribute('value') || '',
-      index: idx,
-      element: opt
-    }));
+    let read: ReadResult;
+    let how = 'open';
 
-    const { selected, suggestion } = resolveOption(candidates, desired, hintCategory);
+    if (searchInput && desired) {
+      // 2. Type without blurring. Results may be a client-side filter (instant) or a server
+      //    search (hundreds of ms). Rows are believed once they answer the query.
+      typeIntoSearchInput(searchInput, desired);
+      pre.typed = desired;
+      how = 'typed';
+      read = await readOptions({ ...ctxBase, typed: true, baseline: null }, TYPED_RESULTS_WAIT_MS);
 
-    if (!selected || !selected.candidate.element) {
-      // Creatable / "+ Add" fallback
-      const addBtn = (pool.root as ParentNode).querySelector<HTMLElement>(CREATE_BUTTON_SELECTOR) || doc.querySelector<HTMLElement>(CREATE_BUTTON_SELECTOR);
-      if (addBtn && isElementVisible(addBtn)) {
-        assertNotSubmitControl(addBtn, 'fillCombobox:addOptionBtn');
-        pointerSequence(addBtn);
-        const changed = await waitForCondition(() => readDisplayedValue(element, trigger) !== pre.displayed, SETTLE_MS, 25);
-        return {
-          status: changed ? 'verified' : 'unverified',
-          value: desired,
-          displayed: readDisplayedValue(element, trigger),
-          reason: 'creatable_option'
-        };
+      // 3. Typing did not search (Workday catalogue prompts): press Enter and read again,
+      //    believing the list once it differs from what was showing when Enter was pressed.
+      if (!read.resolution?.selected && !read.answered) {
+        const baseline = read.texts.join('\n');
+        keydown(searchInput, 'Enter');
+        how = 'enter';
+        read = await readOptions({ ...ctxBase, typed: true, baseline }, ENTER_RESULTS_WAIT_MS);
       }
-      restore();
-      return { status: 'failed', value: desired, reason: `no_option_match:${pool.strategy}`, suggestion: suggestionFrom(suggestion) };
+    } else {
+      read = await readOptions({ ...ctxBase, typed: false, baseline: null }, POPUP_OPEN_WAIT_MS);
+    }
+
+    // Enter may have committed a highlighted row outright (Workday). Accept only if it is ours.
+    if (!read.resolution?.selected && pre.typed) {
+      const pillsNow = pillTexts(element, trigger);
+      const committed = pillsNow.filter((p) => !pre.pills.includes(p));
+      if (committed.length === 1 && normalizeOptionText(committed[0]).includes(normalizeOptionText(desired))) {
+        clearTypedQuery();
+        await closePopupIfOpen(doc, searchInput || element);
+        return { status: 'verified', value: committed[0], displayed: committed[0], reason: `enter_committed:${how}` };
+      }
+    }
+
+    const selected = read.resolution?.selected;
+    if (!selected || !selected.candidate.element) {
+      // Creatable / "+ Add" fallback inside the owned popup only
+      const addBtn = read.popup ? (read.popup as ParentNode).querySelector<HTMLElement>(CREATE_BUTTON_SELECTOR) : doc.querySelector<HTMLElement>(CREATE_BUTTON_SELECTOR);
+      if (addBtn && hasLayout(addBtn)) {
+        assertNotSubmitControl(addBtn, 'fillCombobox:addOptionBtn');
+        pointerClick(addBtn);
+        const changed = await waitForCondition(() => readDisplayedValue(element, trigger) !== pre.displayed || pillTexts(element, trigger).length > pre.pills.length, SELECTION_VERIFY_MS, 50);
+        return { status: changed ? 'verified' : 'unverified', value: desired, displayed: readDisplayedValue(element, trigger), reason: 'creatable_option' };
+      }
+      clearTypedQuery();
+      await closePopupIfOpen(doc, searchInput || element);
+      const reason = read.options.length === 0 ? (read.popup ? 'no_results' : 'popup_not_found') : 'no_option_match';
+      return { status: 'failed', value: desired, reason: `${reason}:${how}`, suggestion: suggestionFrom(read.resolution?.suggestion) };
     }
 
     const option = selected.candidate.element;
     const optionText = cleanText(selected.candidate.text);
     pre.ariaSelected = option.getAttribute('aria-selected');
 
-    // 4. Click the option (Workday Canvas Kit & React-Select need the full pointer sequence)
-    pointerSequence(option);
-    element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    // 4. Click the row (full pointer sequence; refuse detached rows, React throws on them).
+    if (!option.isConnected) {
+      clearTypedQuery();
+      await closePopupIfOpen(doc, searchInput || element);
+      return { status: 'failed', value: desired, reason: 'option_list_changed' };
+    }
+    pointerClick(option);
 
-    let ok = await waitForCondition(() => isSelectionReflected(element, trigger, option, optionText, pre), SETTLE_MS, 25);
+    let ok = await waitForCondition(() => isSelectionReflected(element, trigger, option, optionText, pre), SELECTION_VERIFY_MS, 50);
 
-    // 5. Keyboard fallback: ArrowDown to the option, then Enter
-    if (!ok) {
+    // 5. Keyboard fallback: ArrowDown to the option, then Enter (react-select selects the focused option on Enter).
+    if (!ok && option.isConnected) {
       const target = searchInput || element;
       try {
-        if (typeof target.focus === 'function') target.focus();
+        target.focus();
       } catch {}
-      const steps = Math.min(selected.candidate.index + 1, 50);
+      const idx = read.options.indexOf(option);
+      const steps = Math.min((idx >= 0 ? idx : 0) + 1, 50);
       for (let i = 0; i < steps; i++) keydown(target, 'ArrowDown');
       keydown(target, 'Enter');
-      ok = await waitForCondition(() => isSelectionReflected(element, trigger, option, optionText, pre), COMBOBOX_RETRY_MS, 25);
+      ok = await waitForCondition(() => isSelectionReflected(element, trigger, option, optionText, pre), COMBOBOX_RETRY_MS, 50);
     }
 
     if (ok) {
-      // Real widgets clear the search text once a value is shown elsewhere; make sure no typed
-      // text lingers when the displayed value lives outside the search input.
       const displayEl = findDisplayElement(element, trigger);
       if (searchInput && displayEl && displayEl !== searchInput && searchInput.value === pre.typed && pre.typed) {
-        setNativeValue(searchInput, pre.search);
+        typeIntoSearchInput(searchInput, pre.search);
       }
-      element.dispatchEvent(new Event('blur', { bubbles: true, cancelable: true }));
-      return { status: 'verified', value: optionText, displayed: readDisplayedValue(element, trigger), reason: `option_selected:${pool.strategy}`, match: selected };
+      // Workday keeps the pick only once focus leaves the field.
+      await closePopupIfOpen(doc, searchInput || element);
+      const active = doc.activeElement as HTMLElement | null;
+      if (active && (active === element || active === trigger || active === searchInput)) {
+        try {
+          active.blur();
+        } catch {}
+      }
+      return { status: 'verified', value: optionText, displayed: readDisplayedValue(element, trigger) || pillTexts(element, trigger).slice(-1)[0], reason: `option_selected:${how}`, match: selected };
     }
 
-    // 6. Could not confirm: leave no typed search text behind, close the popup.
-    restore();
-    return { status: 'unverified', value: optionText, displayed: readDisplayedValue(element, trigger), reason: 'selection_not_confirmed', match: selected };
+    // 6. Could not confirm: leave no typed text behind, close the popup, report unverified.
+    clearTypedQuery();
+    await closePopupIfOpen(doc, searchInput || element);
+    return { status: 'unverified', value: optionText, displayed: readDisplayedValue(element, trigger), reason: `selection_not_confirmed:${how}`, match: selected };
   } finally {
     recorder.stop();
   }
@@ -851,14 +1127,14 @@ export async function restoreField(field: FormField, snap: FieldSnapshot): Promi
     }
     case 'combobox': {
       const input = el instanceof HTMLInputElement ? el : el.querySelector<HTMLInputElement>('input:not([type="hidden"])');
-      if (input) setNativeValue(input, snap.value ?? '');
+      if (input && input.value !== (snap.value ?? '')) typeIntoSearchInput(input, snap.value ?? '');
       const scope = field.trigger || el.parentElement || el;
-      const clearBtn = scope.querySelector<HTMLElement>('[class*="clear-indicator"], [class*="clearIndicator"], [aria-label*="clear" i], [data-automation-id="clearButton"], .ant-select-clear, .select2-selection__clear');
+      const clearBtn = scope.querySelector<HTMLElement>('[class*="clear-indicator"], [class*="clearIndicator"], [aria-label*="clear" i], [data-automation-id="clearButton"], .ant-select-clear, .select2-selection__clear, [data-automation-id="DELETE_charm"]');
       const displayedNow = readDisplayedValue(el, field.trigger);
       if (clearBtn && displayedNow && displayedNow !== (snap.displayed || '')) {
-        pointerSequence(clearBtn);
+        pointerClick(clearBtn);
       }
-      keydown(input || el, 'Escape');
+      await closePopupIfOpen(el.ownerDocument || document, input || el);
       const after = readDisplayedValue(el, field.trigger);
       const ok = normalizeOptionText(after) === normalizeOptionText(snap.displayed || '') || (!snap.displayed && !after);
       return { status: ok ? 'verified' : 'unverified', value: snap.displayed, displayed: after, reason: 'undo_combobox' };

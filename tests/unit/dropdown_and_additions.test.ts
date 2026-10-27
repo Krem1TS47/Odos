@@ -187,7 +187,7 @@ describe('Native <select> and Combobox Dropdown Filling', () => {
     expect(outcome.status).toBe('verified');
     expect(clicked).toBe('Bachelor of Science (B.S.)');
     expect(outcome.value).toBe('Bachelor of Science (B.S.)');
-    expect(outcome.reason).toContain('aria_linked');
+    expect(outcome.reason).toContain('option_selected');
     // Back-compat wrapper still reports success
     expect(await fillComboboxWidget(comboboxEl, 'Masters', document, 'degree')).toBe(true);
   });
