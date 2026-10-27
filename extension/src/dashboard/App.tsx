@@ -12,8 +12,41 @@ import { Badge } from '../components/ui/badge';
 import { Separator } from '../components/ui/separator';
 import bundledConfig from '../core/config/bundledConfig.json';
 
+export type TabKey = 'applications' | 'profile' | 'answers' | 'settings';
+
+export const VALID_TABS: TabKey[] = ['applications', 'profile', 'answers', 'settings'];
+
+export function getInitialTab(): TabKey {
+  if (typeof window === 'undefined') return 'profile';
+
+  // 1. Check URL hash (e.g. #applications or #/applications)
+  const hash = window.location.hash.replace(/^#[/]?/, '').toLowerCase().trim();
+  if (VALID_TABS.includes(hash as TabKey)) {
+    return hash as TabKey;
+  }
+
+  // 2. Check query string parameter (e.g. ?tab=applications or ?page=applications)
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = (params.get('tab') || params.get('page') || '').toLowerCase().trim();
+    if (VALID_TABS.includes(tabParam as TabKey)) {
+      return tabParam as TabKey;
+    }
+  } catch {}
+
+  // 3. Fallback to localStorage
+  try {
+    const savedTab = localStorage.getItem('odos_active_tab')?.toLowerCase().trim();
+    if (savedTab && VALID_TABS.includes(savedTab as TabKey)) {
+      return savedTab as TabKey;
+    }
+  } catch {}
+
+  return 'profile';
+}
+
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'applications' | 'profile' | 'answers' | 'settings'>('profile');
+  const [activeTab, setActiveTabState] = useState<TabKey>(getInitialTab);
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [answers, setAnswers] = useState<StoredAnswer[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -21,6 +54,38 @@ export const App: React.FC = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
+  const setActiveTab = (tab: TabKey) => {
+    setActiveTabState(tab);
+    try {
+      localStorage.setItem('odos_active_tab', tab);
+      if (typeof window !== 'undefined' && window.location.hash !== `#${tab}`) {
+        window.history.replaceState(null, '', `#${tab}`);
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      const currentTab = getInitialTab();
+      setActiveTabState(currentTab);
+    };
+
+    // Keep URL in sync on initial mount if hash is missing
+    if (typeof window !== 'undefined') {
+      const currentHash = window.location.hash.replace(/^#[/]?/, '').toLowerCase().trim();
+      if (!VALID_TABS.includes(currentHash as TabKey)) {
+        window.history.replaceState(null, '', `#${activeTab}`);
+      }
+    }
+
+    window.addEventListener('hashchange', handleLocationChange);
+    window.addEventListener('popstate', handleLocationChange);
+    return () => {
+      window.removeEventListener('hashchange', handleLocationChange);
+      window.removeEventListener('popstate', handleLocationChange);
+    };
+  }, []);
 
   const loadData = async () => {
     try {

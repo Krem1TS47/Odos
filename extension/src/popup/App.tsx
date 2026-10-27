@@ -46,11 +46,15 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  const handleOpenDashboard = () => {
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.openOptionsPage) {
+  const handleOpenDashboard = (tab?: string) => {
+    const targetHash = tab ? `#${tab}` : '';
+    const targetUrl = `dashboard.html${targetHash}`;
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
+      chrome.tabs.create({ url: chrome.runtime.getURL(targetUrl) });
+    } else if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.openOptionsPage && !tab) {
       chrome.runtime.openOptionsPage();
     } else {
-      window.open('../dashboard/index.html', '_blank');
+      window.open(`../dashboard/index.html${targetHash}`, '_blank');
     }
   };
 
@@ -101,7 +105,12 @@ export const App: React.FC = () => {
             </div>
           </div>
         </div>
-        <Badge variant="secondary" className="font-mono text-[10px] px-2 py-0.5">
+        <Badge
+          variant="secondary"
+          className="font-mono text-[10px] px-2 py-0.5 cursor-pointer hover:bg-muted transition-colors"
+          onClick={() => handleOpenDashboard('applications')}
+          title="Open Applications in Dashboard"
+        >
           {appCount} Applied
         </Badge>
       </div>
@@ -181,7 +190,7 @@ export const App: React.FC = () => {
 
           <Button
             variant="outline"
-            onClick={handleOpenDashboard}
+            onClick={() => handleOpenDashboard()}
             className="w-full h-8 text-xs font-normal gap-1.5 text-muted-foreground hover:text-foreground"
           >
             <LayoutDashboard className="h-3.5 w-3.5" />
