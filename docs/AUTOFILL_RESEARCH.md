@@ -61,7 +61,7 @@ The reconstruction is local-only and has no LLM. Its architecture is the most de
 | Frames: only the frame with the form fills | Yes | Yes |
 | Resume first | Yes | Workday skipped by design; others in field order |
 | Fill modes: only empty fields / only focused field | Yes | **No** (overwrites) |
-| Multi-page Next navigation (Workday) | Yes | **No** |
+| Multi-page Next navigation (Workday) | Yes | Yes (Workday + generic wizards; resumes across reloads; stops at Review) |
 | Rich-text editors via paste event | Yes | contenteditable via insertText only |
 | Hidden file inputs behind "Upload" buttons (SuccessFactors) | Yes | **No** |
 | Diagnostics | Live-scan test | Console table, Copy diagnostics, `npm run scan` |
@@ -72,9 +72,8 @@ The reconstruction is local-only and has no LLM. Its architecture is the most de
 2. **Tie cap** in `dropdownResolver.resolveOption`: two non-exact options at the same score must not auto-select.
 3. **Answer alternates** in the profile (`United States` / `USA` / `US`, school abbreviations) and an empty-query last attempt for dropdowns.
 4. **Continuous rescan** for a few seconds after filling, not a single pass.
-5. **Workday multi-page:** click Next when no required field is flagged, stop at Review. Never Submit.
-6. **Resume first** on Greenhouse/Lever/Ashby when the site parses resumes into fields.
-7. **Rich-text paste** for Quill/Draft.js/ProseMirror editors.
+5. **Resume first** on Greenhouse/Lever/Ashby when the site parses resumes into fields.
+6. **Rich-text paste** for Quill/Draft.js/ProseMirror editors.
 
 ## Sources
 

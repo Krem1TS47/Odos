@@ -3,6 +3,7 @@ import { generateDedupeKey } from '../core/dedupe';
 import { Job } from '../core/models';
 import bundledConfig from '../core/config/bundledConfig.json';
 import { PromptApiProvider, SemanticMatcher, SemanticRequest } from '../core/semantic';
+import { loadSettings } from '../core/settings';
 
 // Semantic tier (eng review R6b): the on-device Prompt API is reachable from extension
 // contexts, so the content script asks the worker over messaging. Unavailable => null.
@@ -37,6 +38,51 @@ async function syncBundledConfig(): Promise<void> {
 
 chrome.runtime.onInstalled.addListener(() => {
   syncBundledConfig().catch((err) => console.warn('[Odos] YAML sync skipped or failed:', err));
+});
+
+// ---------------------------------------------------------------------------
+// Multi-page continuation: when a step change reloads the page, the content script's run ends.
+// The run arms a continuation before advancing; on the next completed load of that tab the
+// background sends RUN_ODOS with it, so the same application record continues.
+// ---------------------------------------------------------------------------
+const CONTINUATION_TTL_MS = 60_000;
+const continuationKey = (tabId: number) => `odos_continuation_${tabId}`;
+
+async function armContinuation(tabId: number, continuation: unknown): Promise<void> {
+  await chrome.storage.session.set({ [continuationKey(tabId)]: { continuation, expiresAt: Date.now() + CONTINUATION_TTL_MS } });
+}
+
+async function resumeContinuation(tabId: number): Promise<void> {
+  const key = continuationKey(tabId);
+  const stored = (await chrome.storage.session.get(key))[key] as { continuation: unknown; expiresAt: number } | undefined;
+  if (!stored) return;
+  await chrome.storage.session.remove(key);
+  if (Date.now() > stored.expiresAt) return;
+  const send = () => chrome.tabs.sendMessage(tabId, { type: 'RUN_ODOS', continuation: stored.continuation });
+  try {
+    await send();
+  } catch {
+    // Content script not declared for this host: inject (works while the tab keeps the
+    // activeTab grant or the host is in optional permissions), then retry once.
+    try {
+      await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.js'] });
+      await new Promise((r) => setTimeout(r, 300));
+      await send();
+    } catch (err) {
+      console.warn('[Odos] Could not resume the run on the new page:', err);
+    }
+  }
+}
+
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === 'complete') {
+    // Give document_idle content scripts a moment to register their listener.
+    setTimeout(() => void resumeContinuation(tabId), 800);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void chrome.storage.session.remove(continuationKey(tabId));
 });
 
 // Handle extension keyboard shortcut (e.g. Alt+Shift+O)
@@ -87,7 +133,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               profile,
               answers,
               defaultResume: defaultResumeMeta,
-              hasResumeBlob: Boolean(defaultResumeBlob)
+              hasResumeBlob: Boolean(defaultResumeBlob),
+              settings: await loadSettings()
             }
           });
           break;
@@ -158,6 +205,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           const { applicationId, submittedAnswers, resumeId } = message.payload;
           const updated = await repository.markApplicationSubmitted(applicationId, submittedAnswers, resumeId);
           sendResponse({ success: true, data: { application: updated } });
+          break;
+        }
+
+        case 'GET_APPLICATION': {
+          const application = await repository.getApplication(message.applicationId);
+          const job = await repository.getJob(message.jobId);
+          sendResponse(application && job ? { success: true, data: { application, job } } : { success: false, error: 'Application not found' });
+          break;
+        }
+
+        case 'ARM_CONTINUATION': {
+          const tabId = _sender.tab?.id;
+          if (tabId !== undefined) await armContinuation(tabId, message.continuation);
+          sendResponse({ success: tabId !== undefined });
+          break;
+        }
+
+        case 'DISARM_CONTINUATION': {
+          const tabId = _sender.tab?.id;
+          if (tabId !== undefined) await chrome.storage.session.remove(continuationKey(tabId));
+          sendResponse({ success: true });
           break;
         }
 

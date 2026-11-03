@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { executeAutofill, fillFieldWithValue } from '../../extension/src/content/autofillEngine';
 import { captureFieldSnapshot, restoreField } from '../../extension/src/core/filler';
 import { DEFAULT_PROFILE, Profile, StoredAnswer } from '../../extension/src/core/models';
-import { collectManualEdits, readFieldValue } from '../../extension/src/content/index';
+import { collectManualEdits, readFieldValue } from '../../extension/src/content/run/fieldValues';
 import { GenericAdapter } from '../../extension/src/content/adapters/generic';
 
 const profile: Profile = {

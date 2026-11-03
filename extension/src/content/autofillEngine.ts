@@ -2,12 +2,18 @@
  * Autofill engine: maps discovered fields to values and applies them under the
  * verified-fill contract.
  *
- * RUN_ODOS (content/index.ts)
- *   ├─ findMatchingAdapter ─► Greenhouse | Lever | Ashby | Workday | Generic
- *   ├─ GET_PAGE_DATA (profile, answers, resume)                 ──► background
- *   ├─ processDynamicAdditions ── click "+Add" once, guarded ──► DOM
- *   ├─ adapter.discoverFields ─► core/controlClassifier ─► FormField[] (groups, variants, rows)
- *   └─ executeAutofill (this file)
+ * RUN_ODOS (content/index.ts) ─► ApplicationRun (content/run/applicationRun.ts)
+ *   ├─ findMatchingAdapter ─► Greenhouse | Lever | Ashby | Workday | Generic   (+ its PageNavigator)
+ *   ├─ GET_PAGE_DATA (profile, answers, resume, settings)       ──► background
+ *   └─ per page (content/run/pageFill.ts):
+ *        processDynamicAdditions ── click "+Add" once, guarded ──► DOM
+ *        waitForSettle ─► adapter.discoverFields ─► core/controlClassifier ─► FormField[]
+ *        executeAutofill (this file) ─► follow-up scan
+ *      then decideNextStep: stop (review page, required unanswered, errors, ...) or click Next
+ *      and wait for the step to change (core/navigation.ts); full reloads resume via the
+ *      background's armed continuation.
+ *
+ *   executeAutofill (this file)
  *        └─ per field: resolveFieldValue
  *             ├─ section-aware canonical (education/experience rows)
  *             ├─ stored answers: scored lexical matcher (answerMatcher.ts) >= 0.75

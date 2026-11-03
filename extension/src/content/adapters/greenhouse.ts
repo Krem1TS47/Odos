@@ -1,4 +1,5 @@
 import { AtsAdapter, FormField } from './types';
+import { SINGLE_PAGE_NAVIGATOR } from '../../core/navigation';
 import { collectControls, describeControl } from '../../core/controlClassifier';
 
 import { Job } from '../../core/models';
@@ -7,6 +8,8 @@ import { detectPageCaptcha, CaptchaDetection } from '../captcha';
 export class GreenhouseAdapter implements AtsAdapter {
   id = 'greenhouse';
   name = 'Greenhouse';
+  /** Greenhouse applications are one page. */
+  readonly navigation = SINGLE_PAGE_NAVIGATOR;
 
   matches(url: URL, doc: Document): boolean {
     const isDomain =

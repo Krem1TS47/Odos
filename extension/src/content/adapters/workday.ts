@@ -1,4 +1,5 @@
 import { AtsAdapter, FormField } from './types';
+import { createNavigator } from '../../core/navigation';
 import { collectControls, describeControl } from '../../core/controlClassifier';
 import { escapeCss } from '../../core/dom';
 
@@ -8,6 +9,17 @@ import { detectPageCaptcha, CaptchaDetection } from '../captcha';
 export class WorkdayAdapter implements AtsAdapter {
   id = 'workday';
   name = 'Workday';
+  /**
+   * Workday wizard: My Information -> My Experience -> Application Questions -> Voluntary
+   * Disclosures -> Self Identify -> Review. The footer button reads "Save and Continue" (or
+   * "Next") on every step and "Submit" on Review.
+   */
+  readonly navigation = createNavigator({
+    nextSelector: '[data-automation-id="pageFooterNextButton"], [data-automation-id="bottom-navigation-next-button"]',
+    stepSelector: '[data-automation-id="progressBarActiveStep"]',
+    errorSelector: '[data-automation-id="errorMessage"], [data-automation-id="inputAlert"]',
+    finalStep: /\breview\b/i
+  });
 
   matches(url: URL, doc: Document): boolean {
     const isDomain =

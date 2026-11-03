@@ -1,6 +1,7 @@
 import { Job, Profile, StoredAnswer } from '../../core/models';
 import { CanonicalField } from '../../core/fieldSchema';
 import { CaptchaDetection } from '../captcha';
+import { PageNavigator } from '../../core/navigation';
 
 export type FormFieldType =
   | 'text'
@@ -111,4 +112,6 @@ export interface AtsAdapter {
   discoverFields(doc: Document): FormField[];
   confirmationDetected(url: URL, doc: Document): boolean;
   detectCaptcha?(doc: Document): CaptchaDetection;
+  /** How this ATS moves between application steps. */
+  readonly navigation: PageNavigator;
 }

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { repository } from '../../core/storage/repository';
 import { exportProfileToYaml, exportAnswersToYaml } from '../../core/config/yamlExporter';
-import { Trash2, Download, Key, AlertTriangle, FileCode, Check } from 'lucide-react';
+import { Trash2, Download, AlertTriangle, FileCode, Layers } from 'lucide-react';
+import { DEFAULT_SETTINGS, OdosSettings, loadSettings, saveSettings } from '../../core/settings';
 import {
   Card,
   CardHeader,
@@ -17,24 +18,17 @@ interface Props {
 }
 
 export const SettingsView: React.FC<Props> = ({ onDataReset }) => {
-  const [apiKey, setApiKey] = useState('');
-  const [keySaved, setKeySaved] = useState(false);
+  const [settings, setSettings] = useState<OdosSettings>(DEFAULT_SETTINGS);
 
   useEffect(() => {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['gemini_api_key'], (res) => {
-        if (res.gemini_api_key) setApiKey(res.gemini_api_key);
-      });
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      loadSettings().then(setSettings);
     }
   }, []);
 
-  const handleSaveKey = () => {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.set({ gemini_api_key: apiKey.trim() }, () => {
-        setKeySaved(true);
-        setTimeout(() => setKeySaved(false), 2000);
-      });
-    }
+  const updateSettings = async (patch: Partial<OdosSettings>) => {
+    setSettings((prev) => ({ ...prev, ...patch }));
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) setSettings(await saveSettings(patch));
   };
 
   const handleExportJson = async () => {
@@ -96,40 +90,38 @@ export const SettingsView: React.FC<Props> = ({ onDataReset }) => {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      {/* LLM Key */}
+      {/* Multi-page applications */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Key className="h-4 w-4 text-foreground" /> Gemini API Key
+            <Layers className="h-4 w-4 text-foreground" /> Multi-page applications
           </CardTitle>
           <CardDescription className="text-xs">
-            Odos uses your private Gemini API key solely for drafting plain text answers to unmatched open-ended questions. Your key is stored in <code className="font-mono text-foreground font-medium">chrome.storage.local</code> and never synced or transmitted elsewhere.
+            On multi-step applications (Workday and other wizards), Odos fills a page, clicks Next or Save and Continue, and fills the next one. It stops at the review page, when a required field needs your answer, or when the page shows errors. It never clicks Submit.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="flex gap-2">
-            <Input
-              type="password"
-              placeholder="AIzaSy..."
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className="flex-1 font-mono text-xs"
+        <CardContent className="space-y-3">
+          <label className="flex items-center gap-2 text-xs cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.autoAdvancePages}
+              onChange={(e) => updateSettings({ autoAdvancePages: e.target.checked })}
+              className="h-4 w-4 rounded border-input"
             />
-            <Button
-              type="button"
-              onClick={handleSaveKey}
-              size="sm"
-              className="gap-1.5"
-            >
-              {keySaved ? (
-                <>
-                  <Check className="h-3.5 w-3.5" /> Saved
-                </>
-              ) : (
-                'Save Key'
-              )}
-            </Button>
-          </div>
+            Continue to the next page automatically
+          </label>
+          <label className="flex items-center gap-2 text-xs">
+            Stop after
+            <Input
+              type="number"
+              min={1}
+              max={50}
+              value={settings.maxPagesPerRun}
+              onChange={(e) => updateSettings({ maxPagesPerRun: Number(e.target.value) })}
+              className="h-7 w-16 text-xs"
+            />
+            pages per run
+          </label>
         </CardContent>
       </Card>
 

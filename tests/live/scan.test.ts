@@ -16,7 +16,7 @@ import { ProfileSchema, StoredAnswerSchema } from '../../extension/src/core/mode
 import { findMatchingAdapter } from '../../extension/src/content/adapters';
 import { executeAutofill } from '../../extension/src/content/autofillEngine';
 import { mapElementToCanonical } from '../../extension/src/core/fieldMapper';
-import { looksLikeApplicationForm } from '../../extension/src/content/index';
+import { looksLikeApplicationForm } from '../../extension/src/content/run/frameGate';
 
 const file = process.env.ODOS_SCAN_FILE;
 const url = process.env.ODOS_SCAN_URL || 'https://example.com/apply';

@@ -8,7 +8,7 @@ import { resolveCanonicalValue } from '../../extension/src/core/fieldSchema';
 import { resolveOption } from '../../extension/src/core/dropdownResolver';
 import { mapElementToCanonical } from '../../extension/src/core/fieldMapper';
 import { fillButtonGroup, alternateQueries } from '../../extension/src/core/filler';
-import { looksLikeApplicationForm } from '../../extension/src/content/index';
+import { looksLikeApplicationForm } from '../../extension/src/content/run/frameGate';
 import { compareWithBundled } from '../../extension/src/core/storage/repository';
 import { ReviewPanelController } from '../../extension/src/content/ui/panel';
 import { FormField } from '../../extension/src/content/adapters/types';

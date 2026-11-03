@@ -1,4 +1,5 @@
 import { AtsAdapter, FormField } from './types';
+import { createNavigator } from '../../core/navigation';
 import { Job } from '../../core/models';
 import { isSubmitControl } from '../submitGuard';
 import { detectPageCaptcha, CaptchaDetection } from '../captcha';
@@ -9,6 +10,8 @@ import { collectControls, describeControl } from '../../core/controlClassifier';
 export class GenericAdapter implements AtsAdapter {
   id = 'generic';
   name = 'Generic ATS';
+  /** Multi-step forms on other sites (iCIMS, SmartRecruiters, SuccessFactors, company sites). */
+  readonly navigation = createNavigator({ stepSelector: '[aria-current="step"], .step.active, .steps .active, [class*="step"][class*="active"]' });
 
   matches(_url: URL, doc: Document): boolean {
     // Matches if there is at least one interactive form with text/email/file inputs

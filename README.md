@@ -132,6 +132,20 @@ The review panel's subtitle also shows `build <id>`. If it shows a different id 
    - **Needs Review**: Odos left it blank, often with "closest: …" as a hint. Answer inline with **Fill** or **Fill & remember**.
 5. Review the whole form and submit it yourself. Then click **Mark Submitted** (Odos also detects most confirmation pages on its own).
 
+### Multi-page applications
+
+On step-by-step applications (Workday, and wizards on other sites), Odos fills a page, clicks **Next** / **Save and Continue**, and fills the next one, under one application record. The panel shows the page number and step name. Odos stops, and tells you why, when:
+
+| Stop | What to do |
+|---|---|
+| Reached the review page | Check everything and submit yourself. Odos never clicks Submit |
+| Required fields need your answer | Answer them, then press **Continue** in the panel |
+| The page shows errors, or did not change after Next | Fix the errors, then **Continue** |
+| The Next button submits the page to the server | Click Next yourself. Odos fills the next page automatically when it loads |
+| Page limit reached | **Continue** to keep going |
+
+Greenhouse, Lever and Ashby applications are a single page, so Odos stops after filling. Turn automatic page advance off, or change the page limit, in **Dashboard → Settings → Multi-page applications**. Closing the panel stops a run.
+
 Embedded forms (a company careers page with a Greenhouse or Lever form inside an iframe) are handled: only the frame that holds the form is filled.
 
 On a careers site outside the built-in list, the first **Run Odos** click injects Odos into the tab and runs it. Pages Chrome protects (`chrome://`, the Web Store) cannot be filled.
@@ -187,6 +201,8 @@ The `reason` column explains each outcome:
 | `selection_not_confirmed` | Odos clicked an option but the widget did not show it |
 | `workday_upload_requires_human` | Workday resume upload, by design |
 
+Multi-page runs also print a status line per page. The panel's page box gives the stop reason in plain words.
+
 **Offline, from a saved page:** save the application page (File → Save Page As → "Webpage, HTML only"), then:
 
 ```bash
@@ -199,13 +215,13 @@ This prints the adapter Odos picks and, for every field, the question text it re
 
 ## 8. Supported sites
 
-| ATS | Detection | Notes |
-|---|---|---|
-| Greenhouse (classic and job-boards) | host, form markers | React-Select dropdowns, async School/Location search |
-| Lever | host, form markers | Native selects, radio and checkbox cards |
-| Ashby | host, `_systemfield_` markers | Yes/No toggle buttons, location typeahead |
-| Workday | host, `data-automation-id` markers | Prompt typeaheads that search on Enter, "+ Add" sections. Resume upload is manual |
-| Anything else | Generic adapter | Any page that looks like an application form |
+| ATS | Detection | Pages | Notes |
+|---|---|---|---|
+| Greenhouse (classic and job-boards) | host, form markers | single | React-Select dropdowns, async School/Location search |
+| Lever | host, form markers | single | Native selects, radio and checkbox cards |
+| Ashby | host, `_systemfield_` markers | single | Yes/No toggle buttons, location typeahead |
+| Workday | host, `data-automation-id` markers | multi: footer "Save and Continue", stops at Review | Prompt typeaheads that search on Enter, "+ Add" sections. Resume upload is manual |
+| Anything else | Generic adapter | multi: buttons labelled Next / Continue | Any page that looks like an application form |
 
 Content scripts load automatically on Greenhouse, Lever, Ashby and Workday hosts. Elsewhere, Odos is injected when you click **Run Odos**.
 
@@ -221,5 +237,18 @@ npm run scan -- <saved.html> [url]   # dry-run Odos on a saved real page
 ```
 
 `npm run build` rewrites `extension/src/core/config/bundledConfig.json` (it contains your profile and resume). Do not commit it with personal data.
+
+Where things live:
+
+| Path | Responsibility |
+|---|---|
+| `extension/src/content/index.ts` | Content-script bootstrap and message listener only |
+| `extension/src/content/run/applicationRun.ts` | One run across pages: fill, decide, advance, panel, submission |
+| `extension/src/content/run/pageFill.ts` | Fill the step on screen |
+| `extension/src/content/run/{messaging,fieldValues,learning,frameGate}.ts` | Background calls, reading field values, learning listeners, frame selection |
+| `extension/src/core/navigation.ts` | PageNavigator contract, generic navigator, safe Next click |
+| `extension/src/content/adapters/*` | Per-ATS detection, field discovery, and navigator |
+| `extension/src/content/autofillEngine.ts` | Field → value → filler, under the verified-fill contract |
+| `extension/src/core/*` | Classifier, label reading, matching, fillers, models, storage, settings |
 
 Architecture and the reasoning behind the fill engine: `docs/AUTOFILL_RESEARCH.md` and the header of `extension/src/content/autofillEngine.ts`.
