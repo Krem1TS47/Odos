@@ -8,14 +8,35 @@ import { PromptApiProvider, SemanticMatcher, SemanticRequest } from '../core/sem
 // contexts, so the content script asks the worker over messaging. Unavailable => null.
 const semanticMatcher = new SemanticMatcher(new PromptApiProvider(), { timeoutMs: 2500 });
 
-// Automatically seed profile, answers, and resumes from bundled repo YAML on extension install/update
-chrome.runtime.onInstalled.addListener(async () => {
-  try {
-    await repository.syncFromYamlConfig(bundledConfig as any, false);
-    console.log('[Odos] Seeded initial data from repo YAML.');
-  } catch (err) {
-    console.warn('[Odos] Initial YAML seed skipped or error:', err);
+// Keep the extension's data in step with config/*.yaml (bundled at build time).
+//  - First install: seed everything.
+//  - Later builds: re-sync automatically when the bundle changed AND the profile has not been
+//    edited in the dashboard since the last sync. Otherwise leave it and let the dashboard
+//    show the drift banner ("Reload from YAML").
+//  - Stored answers always sync by stable id (ans_N); answers learned on pages are untouched.
+async function syncBundledConfig(): Promise<void> {
+  const bundledAt = (bundledConfig as any).bundledAt as string | undefined;
+  const meta = (await chrome.storage.local.get('odos_sync')).odos_sync as { bundledAt?: string; syncedAt?: number } | undefined;
+  const updatedAt = await repository.getProfileUpdatedAt();
+  const editedSinceSync = Boolean(meta?.syncedAt && updatedAt && Date.parse(updatedAt) > meta.syncedAt + 5000);
+  const bundleChanged = !meta || meta.bundledAt !== bundledAt;
+
+  let force = false;
+  if (meta && bundleChanged && !editedSinceSync) force = true;
+
+  const result = await repository.syncFromYamlConfig(bundledConfig as any, force);
+  if (!result.updated) {
+    // Profile kept (user data or dashboard edits): still bring bundled answers up to date.
+    for (const ans of (bundledConfig as any).answers || []) {
+      await repository.upsertAnswer(ans);
+    }
   }
+  await chrome.storage.local.set({ odos_sync: { bundledAt, syncedAt: Date.now(), profileSynced: result.updated || meta?.bundledAt === bundledAt } });
+  console.log(`[Odos] config sync: ${result.updated ? 'profile+answers synced from YAML' : 'answers synced; profile kept'} (bundle ${bundledAt})`);
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  syncBundledConfig().catch((err) => console.warn('[Odos] YAML sync skipped or failed:', err));
 });
 
 // Handle extension keyboard shortcut (e.g. Alt+Shift+O)
@@ -162,6 +183,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         case 'SYNC_FROM_REPO_CONFIG': {
           const result = await repository.syncFromYamlConfig(bundledConfig as any, true);
+          await chrome.storage.local.set({ odos_sync: { bundledAt: (bundledConfig as any).bundledAt, syncedAt: Date.now(), profileSynced: true } });
           const updatedProfile = await repository.getProfile();
           const updatedAnswers = await repository.listAnswers();
           sendResponse({

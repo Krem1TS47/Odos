@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Profile, StoredAnswer, Job, Application, DEFAULT_PROFILE } from '../core/models';
-import { repository } from '../core/storage/repository';
+import { repository, compareWithBundled } from '../core/storage/repository';
 import { ProfileEditor } from './components/ProfileEditor';
 import { AnswersEditor } from './components/AnswersEditor';
 import { ApplicationsView } from './components/ApplicationsView';
@@ -55,6 +55,7 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [profileIssue, setProfileIssue] = useState<string | null>(null);
+  const [yamlDrift, setYamlDrift] = useState<string[]>([]);
 
   const setActiveTab = (tab: TabKey) => {
     setActiveTabState(tab);
@@ -102,6 +103,11 @@ export const App: React.FC = () => {
       setApplications(loadedApps);
       const status = repository.getProfileLoadStatus();
       setProfileIssue(status.ok ? null : status.issue);
+      try {
+        setYamlDrift(compareWithBundled(loadedProfile, loadedAnswers, bundledConfig as any).differences);
+      } catch {
+        setYamlDrift([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -253,6 +259,16 @@ export const App: React.FC = () => {
 
         {/* Content Area */}
         <main className="flex-1 min-w-0">
+          {yamlDrift.length > 0 && (
+            <div role="status" className="mb-4 rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 flex items-center justify-between gap-3">
+              <span>
+                <strong>Odos is not using your latest config files.</strong> Differs from config/*.yaml: {yamlDrift.join(', ')}. Odos fills from the data saved in the extension, not from the YAML files directly.
+              </span>
+              <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={() => { handleReloadFromYaml().then(loadData); }}>
+                Reload from YAML
+              </Button>
+            </div>
+          )}
           {profileIssue && (
             <div role="alert" className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               <strong>Profile not loaded:</strong> {profileIssue}

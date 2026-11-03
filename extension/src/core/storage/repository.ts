@@ -75,6 +75,12 @@ export class StorageRepository {
     return DEFAULT_PROFILE;
   }
 
+  /** When the stored profile was last written (dashboard save or YAML sync). */
+  async getProfileUpdatedAt(): Promise<string | null> {
+    const record = await this.db.profile.get('current');
+    return record?.updatedAt ?? null;
+  }
+
   async saveProfile(profile: Profile): Promise<void> {
     const validated = ProfileSchema.parse(profile);
     await this.db.profile.put({
@@ -99,17 +105,22 @@ export class StorageRepository {
       return { updated: false, answersCount: 0, hasResume: false };
     }
 
-    // 1. Save Profile
-    await this.saveProfile(config.profile);
+    // 1. Save Profile (keep resumes already uploaded through the dashboard)
+    const keepResumes = current.resumes;
+    await this.saveProfile({ ...ProfileSchema.parse(config.profile), resumes: keepResumes });
 
     // 2. Save Stored Answers
     for (const ans of config.answers) {
       await this.upsertAnswer(ans);
     }
 
-    // 3. Save Resume if provided
+    // 3. Save Resume if provided (skip when a resume with the same file name already exists,
+    //    so repeated syncs do not pile up copies)
     let hasResume = false;
-    if (config.defaultResume && config.defaultResume.dataBase64) {
+    const existingResumes = (await this.getProfile()).resumes;
+    if (config.defaultResume && existingResumes.some((r) => r.fileName === config.defaultResume!.fileName)) {
+      hasResume = true;
+    } else if (config.defaultResume && config.defaultResume.dataBase64) {
       try {
         const binaryStr = atob(config.defaultResume.dataBase64);
         const bytes = new Uint8Array(binaryStr.length);
@@ -478,6 +489,44 @@ export function guessAnswerCategory(question: string): StoredAnswerCategory {
   if (/why|motivat|interest|tell us|describe|what excites|cover letter/.test(q)) return 'motivation';
   if (/hear about|start date|availability|notice|salary|relocat|remote|location|travel|hours|schedule|phone type/.test(q)) return 'logistics';
   return 'other';
+}
+
+export interface YamlDriftReport {
+  drifted: boolean;
+  differences: string[];
+}
+
+/**
+ * Compares stored data with the bundled config/*.yaml so the dashboard can say when the
+ * extension is filling from older data than the files on disk.
+ */
+export function compareWithBundled(
+  stored: Profile,
+  storedAnswers: StoredAnswer[],
+  bundled: { profile: Profile; answers: StoredAnswer[]; defaultResume?: { fileName: string } | null }
+): YamlDriftReport {
+  const b = ProfileSchema.parse(bundled.profile);
+  const differences: string[] = [];
+  const c1 = stored.contact;
+  const c2 = b.contact;
+  for (const k of ['firstName', 'lastName', 'email', 'phone', 'location', 'linkedin', 'github', 'website'] as const) {
+    if ((c1[k] || '') !== (c2[k] || '')) differences.push(`contact.${k}`);
+  }
+  if (JSON.stringify(stored.workAuthorization) !== JSON.stringify(b.workAuthorization)) differences.push('work authorization');
+  const schools = (p: Profile) => p.education.map((e) => `${e.school}|${e.degree}|${e.field}`).join(';');
+  if (schools(stored) !== schools(b)) differences.push('education');
+  const jobs = (p: Profile) => p.experience.map((e) => `${e.company}|${e.title}`).join(';');
+  if (jobs(stored) !== jobs(b)) differences.push('experience');
+  const storedById = new Map(storedAnswers.map((a) => [a.id, a]));
+  const missing = bundled.answers.filter((a) => {
+    const s = storedById.get(a.id);
+    return !s || s.answer !== a.answer || s.questionPatterns.join('|') !== a.questionPatterns.join('|');
+  });
+  if (missing.length > 0) differences.push(`${missing.length} stored answer(s)`);
+  if (bundled.defaultResume && !stored.resumes.some((r) => r.fileName === bundled.defaultResume!.fileName)) {
+    differences.push('resume');
+  }
+  return { drifted: differences.length > 0, differences };
 }
 
 export const repository = new StorageRepository();

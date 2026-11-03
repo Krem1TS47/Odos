@@ -23,14 +23,13 @@ export class GreenhouseAdapter implements AtsAdapter {
     }
 
     // Check for embedded Greenhouse forms or iframes on employer custom domains
+    // Only markers of a Greenhouse form IN THIS document. An embed iframe/script means the form
+    // lives in a child frame, which runs its own copy of Odos. form#application-form is Lever's.
     const hasGreenhouseForm =
       doc.querySelector('form#application_form') !== null ||
       doc.querySelector('form#apply_form') !== null ||
-      doc.querySelector('form#application-form') !== null ||
       doc.querySelector('input[name^="job_application["]') !== null ||
-      doc.querySelector('#grnhse_app') !== null ||
-      doc.querySelector('iframe#grnhse_iframe') !== null ||
-      doc.querySelector('script[src*="greenhouse.io/embed/job_board"]') !== null;
+      doc.querySelector('[id^="question_"][name*="answers"]') !== null;
 
     return hasGreenhouseForm;
   }

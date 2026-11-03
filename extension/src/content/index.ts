@@ -1,4 +1,4 @@
-import { findMatchingAdapter } from './adapters';
+import { findMatchingAdapter, hostsEmbeddedAtsForm } from './adapters';
 import { FormField } from './adapters/types';
 import { executeAutofill, fillFieldWithValue } from './autofillEngine';
 import { ReviewPanelController, ManualEdit } from './ui/panel';
@@ -9,18 +9,59 @@ import { captureFieldSnapshot, FieldSnapshot, readDisplayedValue, restoreField, 
 import { resolveDictionaryHint } from '../core/fieldSchema';
 import { SemanticDecision, SemanticRequest } from '../core/semantic/types';
 import { normalizeOptionText } from '../core/dropdownResolver';
+import { waitForSettle } from '../core/dom';
+import { buildDiagnostics, diagnosticsToText, logDiagnostics } from '../core/diagnostics';
+import { BUILD_ID } from '../core/buildInfo';
 
-console.log('[Odos] Content script active on:', window.location.href);
+console.log(`[Odos] Content script active (build ${BUILD_ID}) on:`, window.location.href);
 
 let currentPanel: ReviewPanelController | null = null;
 let currentApplicationId: string | null = null;
+let currentAdapterId = '';
 let currentFields: FormField[] = [];
 let currentSnapshots = new Map<FormField, FieldSnapshot>();
 let currentResumeId: string | undefined = undefined;
+let submissionRecorded = false;
 
+function extensionVersion(): string {
+  try {
+    return chrome.runtime?.getManifest?.().version || '';
+  } catch {
+    return '';
+  }
+}
+
+function currentDiagnosticsText(): string {
+  return diagnosticsToText(buildDiagnostics({ fields: currentFields, adapterId: currentAdapterId, url: window.location.href, version: extensionVersion() }));
+}
+
+/**
+ * Does this frame hold an application form worth filling? Every frame of the tab receives
+ * RUN_ODOS; only frames that pass answer it. A careers page that embeds the ATS in an iframe,
+ * or a page with a newsletter box and a search field, must not be "filled".
+ */
+export function looksLikeApplicationForm(doc: Document): boolean {
+  if (hostsEmbeddedAtsForm(doc) && doc.querySelectorAll('input:not([type="hidden"]), select, textarea').length < 6) return false;
+  const visible = Array.from(doc.querySelectorAll<HTMLElement>('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="search"]), select, textarea, [role="combobox"]'));
+  if (visible.length < 3) return false;
+  const hasIdentity = Boolean(
+    doc.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i], input[autocomplete="email"], input[type="file"], input[name*="name" i], input[id*="first" i], [data-automation-id*="legalName"], [data-automation-id^="formField-"]')
+  );
+  return hasIdentity;
+}
+
+const w = window as unknown as { __odosContentLoaded?: boolean };
+if (!w.__odosContentLoaded) {
+  w.__odosContentLoaded = true;
+  registerMessageListener();
+}
+
+function registerMessageListener(): void {
 // Listen for messages from background worker or popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'RUN_ODOS') {
+    // Frames without an application form stay silent so the frame that has one answers.
+    if (!looksLikeApplicationForm(document)) return false;
     handleRunOdos()
       .then((res) => sendResponse({ success: true, status: res }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
@@ -28,6 +69,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'GET_DETECTION') {
+    if (window.top !== window && !looksLikeApplicationForm(document)) return false;
     try {
       const detection = detectAts(window.location.href, document);
       sendResponse({ success: true, detection });
@@ -37,6 +79,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 });
+}
 
 /**
  * Bridges the engine's semantic tier to the background worker's on-device provider.
@@ -72,6 +115,10 @@ export function readFieldValue(field: FormField): string {
     case 'checkbox':
     case 'radio':
       return (el as HTMLInputElement).checked ? 'Yes' : '';
+    case 'button_group': {
+      const pressed = (field.groupButtons || []).find((b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true');
+      return pressed ? (pressed.textContent || '').trim() : '';
+    }
     case 'combobox':
       return readDisplayedValue(el, field.trigger);
     case 'file':
@@ -125,7 +172,39 @@ export function collectManualEdits(fields: FormField[], snapshots: Map<FormField
   return edits;
 }
 
-async function saveAnswer(input: { question: string; answer: string; answerId?: string }): Promise<boolean> {
+const SENSITIVE_QUESTION = /password|social security|\bssn\b|date of birth|\bdob\b|credit card|bank|routing|passport number|driver'?s? licen[cs]e number/i;
+
+/**
+ * Learning loop on the page itself: when the user answers a field Odos left for review (or
+ * corrects one it was unsure of), propose remembering that answer in the panel.
+ */
+function attachLearningListeners(fields: FormField[], panelRef: () => ReviewPanelController | null): void {
+  for (const field of fields) {
+    if (field.type === 'file') continue;
+    if (!field.label || field.label.trim().split(/\s+/).length < 2 || SENSITIVE_QUESTION.test(field.label)) continue;
+    const targets: Element[] = field.groupElements?.length
+      ? field.groupElements
+      : field.groupButtons?.length
+        ? field.groupButtons
+        : [field.element, ...(field.trigger ? [field.trigger] : [])];
+    const onAnswer = () => {
+      // Read after the widget has updated its display.
+      setTimeout(() => {
+        const value = readFieldValue(field).trim();
+        if (!value) return;
+        if (field.matchedValue && normalizeOptionText(value) === normalizeOptionText(field.matchedValue) && field.status === 'verified') return;
+        panelRef()?.proposeAnswer(field, value);
+      }, 250);
+    };
+    for (const t of targets) {
+      t.addEventListener('change', onAnswer);
+      t.addEventListener('focusout', onAnswer);
+      if (field.groupButtons) t.addEventListener('click', onAnswer);
+    }
+  }
+}
+
+async function saveAnswer(input: { question: string; answer: string; answerId?: string; autoFill?: boolean }): Promise<boolean> {
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'SAVE_ANSWER', payload: input });
     return Boolean(resp?.success);
@@ -166,7 +245,8 @@ export async function handleRunOdos(): Promise<string> {
     console.warn('[Odos] Dynamic additions error:', err);
   }
 
-  // 4. Discover fields (static and dynamically added)
+  // 4. Discover fields once the page has stopped rendering (static and dynamically added)
+  await waitForSettle(document.body, 400, 3000);
   const fields = adapter.discoverFields(document);
   if (fields.length === 0) {
     throw new Error('No interactive form fields discovered on this page.');
@@ -226,6 +306,8 @@ export async function handleRunOdos(): Promise<string> {
 
   const { job, application, isDuplicate } = logResp.data;
   currentApplicationId = application.id;
+  currentAdapterId = adapter.id;
+  submissionRecorded = false;
 
   // 7. Execute autofill under the verified-fill contract
   const fillResult = await executeAutofill(fields, {
@@ -235,6 +317,30 @@ export async function handleRunOdos(): Promise<string> {
     adapterId: adapter.id,
     semanticMatch: semanticMatchViaBackground
   });
+
+  // Second pass: answers often reveal follow-up questions ("Yes, I need sponsorship" ->
+  // "Which visa?"). Rediscover once and fill anything new.
+  try {
+    await new Promise((r) => setTimeout(r, 400));
+    const known = new Set(fields.map((f) => f.element));
+    const later = adapter.discoverFields(document).filter((f) => !known.has(f.element) && !(f.groupElements || []).some((g) => known.has(g)));
+    if (later.length > 0) {
+      for (const f of later) currentSnapshots.set(f, captureFieldSnapshot(f));
+      const more = await executeAutofill(later, { profile, answers, resumeFile: null, adapterId: adapter.id, semanticMatch: semanticMatchViaBackground });
+      fields.push(...later);
+      fillResult.filledFields.push(...more.filledFields);
+      fillResult.emptyFields.push(...more.emptyFields);
+      fillResult.unverifiedCount += more.unverifiedCount;
+      fillResult.verifiedCount += more.verifiedCount;
+      Object.assign(fillResult.fieldValuesSnapshot, more.fieldValuesSnapshot);
+    }
+  } catch (err) {
+    console.warn('[Odos] Follow-up scan failed:', err);
+  }
+  currentFields = fields;
+
+  // Diagnostics: console summary on every run (collapsed), copyable from the panel.
+  logDiagnostics(buildDiagnostics({ fields, adapterId: adapter.id, url: window.location.href, version: extensionVersion() }));
 
   // 8. Render review panel in closed shadow DOM
   if (currentPanel) {
@@ -290,9 +396,14 @@ export async function handleRunOdos(): Promise<string> {
       for (const e of edits) {
         await saveAnswer({ question: e.field.label, answer: e.value });
       }
-    }
+    },
+    getDiagnostics: currentDiagnosticsText,
+    buildId: BUILD_ID
   });
   currentPanel.render();
+
+  // Learn from what the user types into fields Odos could not (or was unsure how to) fill.
+  attachLearningListeners([...fillResult.emptyFields, ...fillResult.filledFields.filter((f) => f.status === 'unverified')], () => currentPanel);
 
   // 9. Attach post-submit observer
   setupPostSubmitObserver(adapter);
@@ -310,8 +421,9 @@ function currentSubmissionSnapshot(): Record<string, string> {
   return out;
 }
 
-function markSubmitted(): void {
-  if (!currentApplicationId) return;
+function markSubmitted(auto = false): void {
+  if (!currentApplicationId || submissionRecorded) return;
+  submissionRecorded = true;
 
   chrome.runtime.sendMessage({
     type: 'LOG_SUBMISSION',
@@ -324,6 +436,14 @@ function markSubmitted(): void {
 
   if (currentPanel) {
     currentPanel.showSubmittedNotice();
+  } else if (auto) {
+    // The panel is gone but the application went through: keep what the user typed by hand as
+    // draft answers (autoFill off, reviewable in the dashboard) so the next form benefits.
+    const edits = collectManualEdits(currentFields, currentSnapshots);
+    for (const e of edits) {
+      saveAnswer({ question: e.field.label, answer: e.value, autoFill: false });
+    }
+    if (edits.length > 0) console.log(`[Odos] Saved ${edits.length} hand-typed answer(s) as drafts.`);
   }
 }
 
@@ -333,7 +453,7 @@ function setupPostSubmitObserver(adapter: ReturnType<typeof findMatchingAdapter>
   const checkConfirmation = () => {
     const url = new URL(window.location.href);
     if (adapter.confirmationDetected(url, document)) {
-      markSubmitted();
+      markSubmitted(true);
       observer.disconnect();
     }
   };

@@ -267,7 +267,7 @@ describe('Workday prompt behavioural simulation', () => {
     expect(outcome.status).toBe('failed');
     expect(school.state.pills).toEqual([]);
     expect(school.input.value).toBe('');
-  });
+  }, 20000);
 
   it('fills the school through the engine from the profile education row', async () => {
     const school = makeWorkdayPrompt(document, 'school3', 'School or University', ['University of British Columbia', 'University of Toronto'], { searchDelay: 400 });

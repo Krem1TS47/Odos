@@ -383,6 +383,53 @@ export function fillCheckboxGroup(
   return { status: ok ? 'verified' : 'unverified', value: picked, displayed: picked, reason: ok ? 'checkboxes_set' : 'checkbox_not_retained' };
 }
 
+/**
+ * Clicks a toggle button (Ashby Yes/No). Such buttons often have no type attribute, which makes
+ * them submit buttons inside a form. A capturing submit listener cancels any submission the click
+ * could trigger, so Invariant 1 (never submit) holds even for type-less toggles.
+ */
+export function clickToggleButton(btn: HTMLElement): void {
+  const text = (btn.textContent || '').trim();
+  if (/^(submit|apply|submit application|send application)/i.test(text)) {
+    assertNotSubmitControl(btn, 'clickToggleButton');
+  }
+  const form = btn.closest('form');
+  const block = (e: Event) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  form?.addEventListener('submit', block, true);
+  try {
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+      btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, composed: true, button: 0 }));
+    }
+    btn.click();
+  } finally {
+    setTimeout(() => form?.removeEventListener('submit', block, true), 0);
+  }
+}
+
+function isButtonPressed(btn: HTMLElement): boolean {
+  return btn.getAttribute('aria-pressed') === 'true' || btn.getAttribute('aria-checked') === 'true' || btn.getAttribute('data-state') === 'on' || btn.getAttribute('data-selected') === 'true';
+}
+
+/**
+ * Yes/No style button group: click the matching button, verify it reads as pressed (or that the
+ * mirror checkbox flipped).
+ */
+export async function fillButtonGroup(buttons: HTMLElement[], desiredValue: string, hintCategory?: string): Promise<FillOutcome> {
+  const candidates: OptionCandidate[] = buttons.map((b, i) => ({ text: (b.textContent || '').trim(), value: b.getAttribute('data-option') || '', index: i, element: b }));
+  const { selected, suggestion } = resolveOption(candidates, desiredValue, hintCategory || 'boolean');
+  if (!selected) return { status: 'failed', value: desiredValue, reason: 'no_option_match', suggestion: suggestionFrom(suggestion) };
+  const btn = buttons[selected.candidate.index];
+  if (isButtonPressed(btn)) return { status: 'verified', value: selected.candidate.text, reason: 'already_pressed', match: selected };
+  const mirror = btn.parentElement?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+  const mirrorBefore = mirror?.checked;
+  clickToggleButton(btn);
+  const ok = await waitForCondition(() => isButtonPressed(btn) || (mirror !== undefined && mirror !== null && mirror.checked !== mirrorBefore), SELECTION_VERIFY_MS, 50);
+  return { status: ok ? 'verified' : 'unverified', value: selected.candidate.text, displayed: selected.candidate.text, reason: ok ? 'button_pressed' : 'button_not_confirmed', match: selected };
+}
+
 // ---------------------------------------------------------------------------
 // Custom comboboxes
 //
@@ -412,6 +459,8 @@ export interface ComboboxFillOptions {
   variant?: DropdownVariant;
   hintCategory?: string;
   doc?: Document;
+  /** Value the options are matched against when the typed query is a shortened form. */
+  matchAgainst?: string;
 }
 
 /** How long a popup may take to open after the click. */
@@ -594,21 +643,32 @@ export function findOwnedPopup(
   optionSource: Element | null | undefined,
   doc: Document
 ): Element | null {
+  return findOwnedPopupWithStrategy(control, trigger, before, recorder, optionSource, doc).popup;
+}
+
+export function findOwnedPopupWithStrategy(
+  control: HTMLElement,
+  trigger: HTMLElement | null | undefined,
+  before: Set<Element>,
+  recorder: { peek(): Element[] },
+  optionSource: Element | null | undefined,
+  doc: Document
+): { popup: Element | null; strategy: string } {
   for (const node of [control, trigger].filter(Boolean) as Element[]) {
     const refs = [...resolveIdRefs(node, 'aria-controls', doc), ...resolveIdRefs(node, 'aria-owns', doc)];
     const active = resolveIdRefs(node, 'aria-activedescendant', doc)[0];
     if (active?.parentElement) refs.push(active.closest(POPUP_SELECTOR) || active.parentElement);
     for (const r of refs) {
-      if (r !== control && r !== trigger && hasLayout(r) && !isPillListNode(r)) return r;
+      if (r !== control && r !== trigger && hasLayout(r) && !isPillListNode(r)) return { popup: r, strategy: 'aria_linked' };
     }
   }
 
   const appeared = visiblePopups(doc).filter((p) => !before.has(p));
-  if (appeared.length === 1) return appeared[0];
+  if (appeared.length === 1) return { popup: appeared[0], strategy: 'appeared_after_click' };
   if (appeared.length > 1) {
     // Prefer the one holding options; if still ambiguous, the first that appeared.
     const withOptions = appeared.filter((p) => collectOptions(p).length > 0);
-    if (withOptions.length >= 1) return withOptions[0];
+    if (withOptions.length >= 1) return { popup: withOptions[0], strategy: 'appeared_after_click_multi' };
   }
 
   const added = recorder.peek().filter((n) => n.isConnected && !isPillListNode(n));
@@ -616,22 +676,22 @@ export function findOwnedPopup(
   const outer = addedRoots.filter((r) => !addedRoots.some((o) => o !== r && o.contains(r)));
   if (outer.length >= 1) {
     const popup = outer[0].matches(POPUP_SELECTOR) ? outer[0] : outer[0].querySelector(POPUP_SELECTOR) || outer[0];
-    return popup;
+    return { popup, strategy: 'added_nodes' };
   }
 
-  if (optionSource && optionSource.isConnected && hasLayout(optionSource) && !isPillListNode(optionSource)) return optionSource;
+  if (optionSource && optionSource.isConnected && hasLayout(optionSource) && !isPillListNode(optionSource)) return { popup: optionSource, strategy: 'option_source' };
 
   const wrap = fieldWrapperOf(trigger || control);
   if (wrap) {
     for (const scope of [wrap, wrap.parentElement].filter(Boolean) as Element[]) {
       const own = Array.from(scope.querySelectorAll(POPUP_SELECTOR)).filter((p) => hasLayout(p) && !isPillListNode(p));
-      if (own.length > 0) return own[0];
+      if (own.length > 0) return { popup: own[0], strategy: 'field_wrapper' };
     }
   }
 
   const all = visiblePopups(doc).filter((p) => collectOptions(p).length > 0);
-  if (all.length === 1) return all[0];
-  return null;
+  if (all.length === 1) return { popup: all[0], strategy: 'single_visible_popup' };
+  return { popup: null, strategy: 'none' };
 }
 
 function queryWords(query: string): string[] {
@@ -658,11 +718,18 @@ function answersQuery(texts: string[], query: string, baseline: string | null): 
 
 interface ReadResult {
   popup: Element | null;
+  popupStrategy: string;
   options: HTMLElement[];
   texts: string[];
   resolution: OptionResolution | null;
   answered: boolean;
 }
+
+const debug = (...args: unknown[]) => {
+  try {
+    console.debug('[Odos:combobox]', ...args);
+  } catch {}
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -681,6 +748,7 @@ async function readOptions(
     optionSource: Element | null | undefined;
     doc: Document;
     desired: string;
+    matchAgainst: string;
     hint?: string;
     typed: boolean;
     baseline: string | null;
@@ -690,9 +758,9 @@ async function readOptions(
   const deadline = Date.now() + deadlineMs;
   let last: string | null = null;
   let steadySince = Date.now();
-  let lastResult: ReadResult = { popup: null, options: [], texts: [], resolution: null, answered: false };
+  let lastResult: ReadResult = { popup: null, popupStrategy: 'none', options: [], texts: [], resolution: null, answered: false };
   for (;;) {
-    const popup = findOwnedPopup(ctx.control, ctx.trigger, ctx.before, ctx.recorder, ctx.optionSource, ctx.doc);
+    const { popup, strategy } = findOwnedPopupWithStrategy(ctx.control, ctx.trigger, ctx.before, ctx.recorder, ctx.optionSource, ctx.doc);
     const loading = popup ? isLoading(popup) : false;
     const options = popup && !loading ? collectOptions(popup) : [];
     const texts = options.map(optionLabelText);
@@ -703,8 +771,11 @@ async function readOptions(
       index: idx,
       element: opt
     }));
-    const resolution = candidates.length > 0 ? resolveOption(candidates, ctx.desired, ctx.hint) : null;
-    lastResult = { popup, options, texts, resolution, answered: searched && options.length > 0 };
+    let resolution = candidates.length > 0 ? resolveOption(candidates, ctx.matchAgainst, ctx.hint) : null;
+    if (candidates.length > 0 && !resolution?.selected && ctx.matchAgainst !== ctx.desired) {
+      resolution = resolveOption(candidates, ctx.desired, ctx.hint);
+    }
+    lastResult = { popup, popupStrategy: strategy, options, texts, resolution, answered: searched && options.length > 0 };
     if (searched && resolution?.selected) return lastResult;
 
     const key = texts.join('\n');
@@ -793,7 +864,40 @@ async function closePopupIfOpen(doc: Document, focusTarget: Element | null): Pro
 /**
  * Drives a custom combobox/listbox widget under the verified-fill contract.
  */
+/**
+ * Shorter search queries to try when the full answer finds nothing: drop parentheticals and
+ * leading articles, then the first three words, then the distinctive last words
+ * ("The University of British Columbia" -> "University of British Columbia" -> "British Columbia").
+ */
+export function alternateQueries(desired: string): string[] {
+  const out: string[] = [];
+  const push = (q: string) => {
+    const t = q.replace(/\s+/g, ' ').trim();
+    if (t.length >= 2 && !out.some((o) => o.toLowerCase() === t.toLowerCase()) && t.toLowerCase() !== desired.trim().toLowerCase()) out.push(t);
+  };
+  const base = desired.replace(/\([^)]*\)/g, ' ').replace(/^(the|a|an)\s+/i, '');
+  push(base);
+  const words = base.split(/\s+/).filter(Boolean);
+  if (words.length > 3) push(words.slice(0, 3).join(' '));
+  const stop = /^(of|the|and|at|in|for|university|college|school|institute)$/i;
+  const distinctive = words.filter((w) => !stop.test(w));
+  if (distinctive.length >= 1 && distinctive.length < words.length) push(distinctive.join(' '));
+  return out.slice(0, 2);
+}
+
 export async function fillCombobox(opts: ComboboxFillOptions): Promise<FillOutcome> {
+  const first = await fillComboboxOnce(opts);
+  // Retry with a shorter query only when the search returned nothing at all; when it returned
+  // rows that did not match, a shorter query rarely helps and costs seconds per field.
+  if (first.status !== 'failed' || !/^no_results/.test(first.reason)) return first;
+  for (const q of alternateQueries(opts.desired).slice(0, 1)) {
+    const retry = await fillComboboxOnce({ ...opts, desired: q, matchAgainst: opts.desired });
+    if (retry.status !== 'failed') return { ...retry, reason: `${retry.reason}:alt_query` };
+  }
+  return first;
+}
+
+async function fillComboboxOnce(opts: ComboboxFillOptions & { matchAgainst?: string }): Promise<FillOutcome> {
   const { element, desired, hintCategory } = opts;
   const doc = opts.doc || element.ownerDocument || document;
   assertNotSubmitControl(element, 'fillCombobox');
@@ -825,7 +929,7 @@ export async function fillCombobox(opts: ComboboxFillOptions): Promise<FillOutco
 
   const before = new Set(visiblePopups(doc));
   const recorder = startAddedNodeRecorder(doc);
-  const ctxBase = { control: element, trigger, before, recorder, optionSource: opts.optionSource, doc, desired, hint: hintCategory };
+  const ctxBase = { control: element, trigger, before, recorder, optionSource: opts.optionSource, doc, desired, matchAgainst: opts.matchAgainst || desired, hint: hintCategory };
 
   const clearTypedQuery = () => {
     if (searchInput && pre.typed && searchInput.value === pre.typed) {
@@ -853,6 +957,7 @@ export async function fillCombobox(opts: ComboboxFillOptions): Promise<FillOutco
 
     let read: ReadResult;
     let how = 'open';
+    debug('open', { control: element.tagName, trigger: trigger?.tagName, hasSearchInput: Boolean(searchInput), desired, variant: opts.variant, preDisplayed: pre.displayed });
 
     if (searchInput && desired) {
       // 2. Type without blurring. Results may be a client-side filter (instant) or a server
@@ -861,6 +966,7 @@ export async function fillCombobox(opts: ComboboxFillOptions): Promise<FillOutco
       pre.typed = desired;
       how = 'typed';
       read = await readOptions({ ...ctxBase, typed: true, baseline: null }, TYPED_RESULTS_WAIT_MS);
+      debug('after typing', { popup: read.popupStrategy, options: read.texts.length, answered: read.answered, selected: read.resolution?.selected?.candidate.text, sample: read.texts.slice(0, 5) });
 
       // 3. Typing did not search (Workday catalogue prompts): press Enter and read again,
       //    believing the list once it differs from what was showing when Enter was pressed.
@@ -869,9 +975,11 @@ export async function fillCombobox(opts: ComboboxFillOptions): Promise<FillOutco
         keydown(searchInput, 'Enter');
         how = 'enter';
         read = await readOptions({ ...ctxBase, typed: true, baseline }, ENTER_RESULTS_WAIT_MS);
+        debug('after Enter', { popup: read.popupStrategy, options: read.texts.length, answered: read.answered, selected: read.resolution?.selected?.candidate.text, sample: read.texts.slice(0, 5) });
       }
     } else {
       read = await readOptions({ ...ctxBase, typed: false, baseline: null }, POPUP_OPEN_WAIT_MS);
+      debug('after open', { popup: read.popupStrategy, options: read.texts.length, selected: read.resolution?.selected?.candidate.text, sample: read.texts.slice(0, 5) });
     }
 
     // Enter may have committed a highlighted row outright (Workday). Accept only if it is ours.
@@ -898,7 +1006,8 @@ export async function fillCombobox(opts: ComboboxFillOptions): Promise<FillOutco
       clearTypedQuery();
       await closePopupIfOpen(doc, searchInput || element);
       const reason = read.options.length === 0 ? (read.popup ? 'no_results' : 'popup_not_found') : 'no_option_match';
-      return { status: 'failed', value: desired, reason: `${reason}:${how}`, suggestion: suggestionFrom(read.resolution?.suggestion) };
+      debug('failed', { reason, how, popup: read.popupStrategy });
+      return { status: 'failed', value: desired, reason: `${reason}:${how}:${read.popupStrategy}`, suggestion: suggestionFrom(read.resolution?.suggestion) };
     }
 
     const option = selected.candidate.element;
@@ -914,6 +1023,7 @@ export async function fillCombobox(opts: ComboboxFillOptions): Promise<FillOutco
     pointerClick(option);
 
     let ok = await waitForCondition(() => isSelectionReflected(element, trigger, option, optionText, pre), SELECTION_VERIFY_MS, 50);
+    debug('clicked option', { option: optionText, verifiedByClick: ok, displayed: readDisplayedValue(element, trigger), pills: pillTexts(element, trigger) });
 
     // 5. Keyboard fallback: ArrowDown to the option, then Enter (react-select selects the focused option on Enter).
     if (!ok && option.isConnected) {
@@ -941,13 +1051,14 @@ export async function fillCombobox(opts: ComboboxFillOptions): Promise<FillOutco
           active.blur();
         } catch {}
       }
-      return { status: 'verified', value: optionText, displayed: readDisplayedValue(element, trigger) || pillTexts(element, trigger).slice(-1)[0], reason: `option_selected:${how}`, match: selected };
+      return { status: 'verified', value: optionText, displayed: readDisplayedValue(element, trigger) || pillTexts(element, trigger).slice(-1)[0], reason: `option_selected:${how}:${read.popupStrategy}`, match: selected };
     }
 
     // 6. Could not confirm: leave no typed text behind, close the popup, report unverified.
     clearTypedQuery();
     await closePopupIfOpen(doc, searchInput || element);
-    return { status: 'unverified', value: optionText, displayed: readDisplayedValue(element, trigger), reason: `selection_not_confirmed:${how}`, match: selected };
+    debug('unverified', { option: optionText, how, popup: read.popupStrategy });
+    return { status: 'unverified', value: optionText, displayed: readDisplayedValue(element, trigger), reason: `selection_not_confirmed:${how}:${read.popupStrategy}`, match: selected };
   } finally {
     recorder.stop();
   }

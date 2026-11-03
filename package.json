@@ -10,7 +10,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "check-budget": "node scripts/check-budget.js",
-    "benchmark": "vitest run tests/unit/benchmark.test.ts"
+    "benchmark": "vitest run tests/unit/benchmark.test.ts",
+    "scan": "node scripts/scan.js"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.3.1",

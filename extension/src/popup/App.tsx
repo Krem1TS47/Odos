@@ -61,25 +61,45 @@ export const App: React.FC = () => {
   const handleRunOdos = () => {
     setIsRunning(true);
     setStatusMessage(null);
-    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const tab = tabs[0];
-        if (tab?.id) {
-          chrome.tabs.sendMessage(tab.id, { type: 'RUN_ODOS' }, (response) => {
-            setIsRunning(false);
-            if (chrome.runtime.lastError) {
-              setStatusMessage('Content script not active on this page yet. Refresh and try again.');
-            } else if (response?.status) {
-              setStatusMessage(response.status);
-            }
-          });
-        } else {
-          setIsRunning(false);
-        }
-      });
-    } else {
+    if (typeof chrome === 'undefined' || !chrome.tabs || !chrome.tabs.query) {
       setIsRunning(false);
+      return;
     }
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id) {
+        setIsRunning(false);
+        return;
+      }
+      const tabId = tab.id;
+      const run = (afterInject: boolean) => {
+        chrome.tabs.sendMessage(tabId, { type: 'RUN_ODOS' }, (response) => {
+          const err = chrome.runtime.lastError;
+          if (err && !afterInject) {
+            // Not injected (custom careers domain, or the tab was open before the extension
+            // loaded/reloaded): inject into every frame, then try once more.
+            chrome.runtime.sendMessage({ type: 'INJECT_CONTENT_SCRIPT', tabId }, (inj) => {
+              if (chrome.runtime.lastError || !inj?.success) {
+                setIsRunning(false);
+                setStatusMessage('Odos cannot run on this page (browser pages and the Chrome Web Store are blocked).');
+                return;
+              }
+              setTimeout(() => run(true), 300);
+            });
+            return;
+          }
+          setIsRunning(false);
+          if (err) {
+            setStatusMessage('No application form found in this tab. Open the application page itself (not the job description) and try again.');
+          } else if (response?.success === false) {
+            setStatusMessage(response.error || 'Odos could not fill this page.');
+          } else if (response?.status) {
+            setStatusMessage(response.status);
+          }
+        });
+      };
+      run(false);
+    });
   };
 
   const hostName = currentUrl ? (() => {

@@ -196,12 +196,19 @@ async function runBuild() {
     '@lib': path.resolve(rootDir, 'extension/src/lib')
   };
 
+  // Build identifier: shown in the review panel, the popup and chrome://extensions so a stale
+  // load is obvious at a glance.
+  const buildId = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 13);
+  const define = { __ODOS_BUILD__: JSON.stringify(buildId) };
+  console.log(`\n🏷  Build id: ${buildId}`);
+
   // Step 1: Build Pages & Background (ES Module)
   console.log('\n📦 Step 1: Building Dashboard, Popup & Background...');
   await build({
     root: path.resolve(rootDir, 'extension'),
     plugins: [react()],
     resolve: { alias },
+    define,
     build: {
       outDir,
       emptyOutDir: false,
@@ -228,6 +235,7 @@ async function runBuild() {
   await build({
     root: path.resolve(rootDir, 'extension'),
     resolve: { alias },
+    define,
     build: {
       outDir,
       emptyOutDir: false,
@@ -247,10 +255,11 @@ async function runBuild() {
 
   // Step 3: Copy manifest.json & public static assets
   console.log('\n📄 Step 3: Copying manifest and assets...');
-  fs.copyFileSync(
-    path.resolve(rootDir, 'extension/manifest.json'),
-    path.resolve(outDir, 'manifest.json')
-  );
+  {
+    const manifest = JSON.parse(fs.readFileSync(path.resolve(rootDir, 'extension/manifest.json'), 'utf-8'));
+    manifest.version_name = `${manifest.version} (build ${buildId})`;
+    fs.writeFileSync(path.resolve(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf-8');
+  }
 
   const publicDir = path.resolve(rootDir, 'extension/public');
   if (fs.existsSync(publicDir)) {

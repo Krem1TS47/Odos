@@ -354,9 +354,16 @@ export function findCategoryKey(dict: Record<string, string[]>, text: string): s
  * Without a hint, a dictionary applies only when the option set itself looks like it:
  * at least two distinct keys of the dictionary must each be matched by some option.
  */
+/**
+ * Dictionaries safe to infer from the options alone: small closed answer sets. Open-ended ones
+ * (website_type, phone_type, country) only apply with an explicit hint; inferring website_type
+ * turned "Company website" into "Palantir Medium Blog" because "blog" and "website" share a key.
+ */
+const DERIVABLE_DICTIONARIES = ['boolean', 'work_authorization', 'sponsorship', 'degree', 'gender', 'veteran', 'disability'];
+
 export function deriveApplicableDictionaries(candidates: OptionCandidate[]): Record<string, string[]>[] {
   const result: Record<string, string[]>[] = [];
-  for (const dict of Object.values(SYNONYM_DICTIONARIES)) {
+  for (const dict of DERIVABLE_DICTIONARIES.map((k) => SYNONYM_DICTIONARIES[k]).filter(Boolean)) {
     const keys = new Set<string>();
     for (const c of candidates) {
       const k = findCategoryKey(dict, c.text) || findCategoryKey(dict, c.value);

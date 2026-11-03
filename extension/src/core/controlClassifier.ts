@@ -22,7 +22,7 @@
 import { isSubmitControl } from '../content/submitGuard';
 import { DropdownVariant, FormField, FormFieldType } from '../content/adapters/types';
 import { deepQuerySelectorAll, isElementVisible, resolveIdRefs } from './dom';
-import { LabelResolutionExtras, resolveFieldLabel } from './fieldMapper';
+import { LabelResolutionExtras, resolveFieldLabel, questionTextFor, ownText } from './fieldMapper';
 
 export interface ClassifiedControl {
   /** The element Odos interacts with (input for searchable comboboxes, button for listbox buttons). */
@@ -39,6 +39,22 @@ export interface ClassifiedControl {
   groupElements?: HTMLInputElement[];
   /** Closest shared container of a group (fieldset / role=radiogroup / common parent). */
   groupContainer?: HTMLElement | null;
+  /** Toggle buttons of a button group. */
+  groupButtons?: HTMLElement[];
+}
+
+/**
+ * A Yes/No style toggle group: 2-6 buttons with aria-pressed (or data-option) sharing a parent,
+ * usually beside a hidden checkbox that only mirrors the choice (Ashby). Returns the buttons.
+ */
+export function findToggleButtonGroup(container: Element): HTMLElement[] | null {
+  const buttons = Array.from(container.querySelectorAll<HTMLElement>(':scope > button, :scope > [role="button"], :scope > [role="radio"]'));
+  if (buttons.length < 2 || buttons.length > 6) return null;
+  const toggles = buttons.filter((b) => b.hasAttribute('aria-pressed') || b.hasAttribute('data-option') || b.getAttribute('role') === 'radio' || b.hasAttribute('aria-checked'));
+  if (toggles.length !== buttons.length) return null;
+  const texts = buttons.map((b) => (b.textContent || '').trim());
+  if (texts.some((t) => !t || t.length > 60)) return null;
+  return buttons;
 }
 
 /** Selector that finds every element worth classifying. */
@@ -264,6 +280,15 @@ export function classifyControl(el: HTMLElement, doc: Document = document): Clas
 function groupKeyFor(input: HTMLInputElement, doc: Document): string {
   const form = input.closest('form');
   const scope = form ? `form:${Array.from(doc.querySelectorAll('form')).indexOf(form)}` : 'doc';
+  // Checkbox groups are often one question with a distinct name per option (Ashby uses the
+  // option text as the name). Group those by their fieldset / role=group container.
+  if (input.type === 'checkbox') {
+    const group = input.closest('fieldset, [role="group"], [role="radiogroup"]');
+    if (group && group.querySelectorAll('input[type="checkbox"]').length > 1) {
+      const all = Array.from(doc.querySelectorAll('fieldset, [role="group"], [role="radiogroup"]'));
+      return `${scope}|cbgroup:${all.indexOf(group)}`;
+    }
+  }
   const name = (input.getAttribute('name') || '').replace(/\[\]$/, '');
   if (name) return `${scope}|name:${name}`;
   const group = input.closest('[role="radiogroup"], [role="group"], fieldset');
@@ -300,13 +325,41 @@ export function collectControls(
 
   const seen = new Set<HTMLElement>();
   const ordered: ClassifiedControl[] = [];
+
+  // Toggle button groups (Ashby Yes/No). Their hidden checkbox only mirrors the choice.
+  const toggleGroupFor = new Map<HTMLElement, HTMLElement[]>();
+  const containers = new Set<Element>();
+  (options.deep ? deepQuerySelectorAll('button[aria-pressed], button[data-option], [role="radio"][aria-checked]', root) : Array.from(root.querySelectorAll('button[aria-pressed], button[data-option], [role="radio"][aria-checked]'))).forEach((b) => {
+    if (b.parentElement) containers.add(b.parentElement);
+  });
+  const toggleAnchors = new Map<Element, HTMLElement[]>();
+  for (const c of containers) {
+    const buttons = findToggleButtonGroup(c);
+    if (!buttons) continue;
+    toggleAnchors.set(buttons[0], buttons);
+    c.querySelectorAll<HTMLElement>('input[type="checkbox"], input[type="radio"]').forEach((i) => seen.add(i));
+    buttons.forEach((b) => toggleGroupFor.set(b, buttons));
+  }
   const radioGroups = new Map<string, HTMLInputElement[]>();
   const checkboxGroups = new Map<string, HTMLInputElement[]>();
   const groupSlot = new Map<string, number>();
 
-  for (const el of elements) {
+  // Visit toggle anchors in document order alongside other controls.
+  const orderedElements = toggleAnchors.size > 0
+    ? [...elements, ...Array.from(toggleAnchors.keys()) as HTMLElement[]].sort((a, b) => (a === b ? 0 : a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+    : elements;
+
+  for (const el of orderedElements) {
     if (seen.has(el)) continue;
     seen.add(el);
+
+    const toggle = toggleAnchors.get(el);
+    if (toggle) {
+      toggle.forEach((b) => seen.add(b));
+      ordered.push({ element: el, type: 'button_group', groupButtons: toggle, groupContainer: el.parentElement as HTMLElement });
+      continue;
+    }
+    if (toggleGroupFor.has(el)) continue;
 
     const classified = classifyControl(el, doc);
     if (!classified) continue;
@@ -390,36 +443,37 @@ export function optionLabelFor(input: HTMLInputElement, doc: Document = document
 export function groupLabelFor(control: ClassifiedControl, doc: Document = document): string {
   const container = control.groupContainer;
   const inputs = control.groupElements || [];
-  const belongsToOption = (el: Element) =>
-    Boolean(el.querySelector('input')) || inputs.some((i) => i.id && el.getAttribute('for') === i.id);
+  const optionLabels = control.groupButtons
+    ? control.groupButtons.map((b) => (b.textContent || '').trim())
+    : inputs.map((i) => optionLabelFor(i, doc));
 
   if (container) {
-    const legend = container.querySelector('legend');
-    if (legend && (legend.textContent || '').trim()) return (legend.textContent || '').replace(/\s+/g, ' ').trim();
+    const legend = container.querySelector(':scope > legend');
+    if (legend && ownText(legend)) return ownText(legend);
 
-    const ariaLabel = container.getAttribute('aria-label');
-    if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
-    const labelledBy = resolveIdRefs(container, 'aria-labelledby', doc)
-      .map((l) => (l.textContent || '').trim())
-      .filter(Boolean)
-      .join(' ');
-    if (labelledBy) return labelledBy;
-
-    const candidates = Array.from(container.querySelectorAll('label, [id$="-label"], .label, .application-label, h3, h4, legend, p'));
-    const heading = candidates.find((c) => !belongsToOption(c) && (c.textContent || '').trim());
-    if (heading) return (heading.textContent || '').replace(/\s+/g, ' ').trim();
-
-    let prev = container.previousElementSibling;
-    for (let i = 0; i < 2 && prev; i++) {
-      if (/^(LABEL|LEGEND|H[1-6]|P|SPAN|DIV)$/.test(prev.tagName) && !prev.querySelector('input, select, textarea')) {
-        const t = (prev.textContent || '').replace(/\s+/g, ' ').trim();
-        if (t) return t;
-      }
-      prev = prev.previousElementSibling;
+    for (const node of [container, container.closest('[role="radiogroup"], [role="group"], fieldset')].filter(Boolean) as Element[]) {
+      const ariaLabel = node.getAttribute('aria-label');
+      if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+      const labelledBy = resolveIdRefs(node, 'aria-labelledby', doc)
+        .map((l) => ownText(l))
+        .filter(Boolean)
+        .join(' ');
+      if (labelledBy) return labelledBy;
     }
   }
 
-  return resolveFieldLabel(inputs[0] || control.element, doc, { fallbackToName: true });
+  // label[for] pointing at the group's name (Ashby radio fieldsets, button groups' mirror checkbox)
+  const nameHolder = inputs[0] || container?.querySelector('input[name]');
+  const name = nameHolder?.getAttribute('name');
+  if (name) {
+    const forName = doc.querySelector(`label[for="${CSS && typeof CSS.escape === 'function' ? CSS.escape(name) : name}"]`);
+    if (forName && ownText(forName)) return ownText(forName);
+  }
+
+  const anchor = (inputs[0] || control.groupButtons?.[0] || control.element) as HTMLElement;
+  const q = questionTextFor(anchor, optionLabels, {}, [...inputs, ...(control.groupButtons || [])]);
+  if (q) return q;
+  return resolveFieldLabel(anchor, doc, { fallbackToName: true });
 }
 
 const REPEAT_ITEM_SELECTORS: Array<{ section: 'education' | 'experience' | 'website'; selector: string }> = [
@@ -476,7 +530,7 @@ export function describeControl(control: ClassifiedControl, index: number, doc: 
   const id = custom.id ?? (el.getAttribute('id') || `${opts.idPrefix}_${index}`);
 
   let rawLabel: string;
-  if (control.type === 'radio_group' || control.type === 'checkbox_group') {
+  if (control.type === 'radio_group' || control.type === 'checkbox_group' || control.type === 'button_group') {
     rawLabel = groupLabelFor(control, doc);
   } else {
     rawLabel = resolveFieldLabel(el, doc, opts.labelExtras);
@@ -501,6 +555,9 @@ export function describeControl(control: ClassifiedControl, index: number, doc: 
   } else if (control.groupElements) {
     options = control.groupElements.map((g) => optionLabelFor(g, doc));
     optionValues = control.groupElements.map((g) => g.value);
+  } else if (control.groupButtons) {
+    options = control.groupButtons.map((b) => (b.textContent || '').trim());
+    optionValues = control.groupButtons.map((b) => b.getAttribute('data-option') || (b.textContent || '').trim());
   }
 
   const repeat = detectRepeatRow(el);
@@ -518,6 +575,7 @@ export function describeControl(control: ClassifiedControl, index: number, doc: 
     trigger: control.trigger,
     optionSource: control.optionSource,
     groupElements: control.groupElements,
+    groupButtons: control.groupButtons,
     rowIndex: repeat?.rowIndex,
     repeatSection: repeat?.section
   };

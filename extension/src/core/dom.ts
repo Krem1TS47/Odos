@@ -255,3 +255,29 @@ export function resolveIdRefs(el: Element, attr: string, doc: Document = documen
   }
   return out;
 }
+
+/**
+ * Resolves once the DOM has been quiet (no added/removed nodes) for `quietMs`, or after `maxMs`.
+ * ATS pages are often still rendering sections when the user clicks Run.
+ */
+export function waitForSettle(root: Node = document.body, quietMs = 400, maxMs = 3000): Promise<void> {
+  return new Promise((resolve) => {
+    let quietTimer: ReturnType<typeof setTimeout> | null = null;
+    const done = () => {
+      observer.disconnect();
+      if (quietTimer) clearTimeout(quietTimer);
+      clearTimeout(cap);
+      resolve();
+    };
+    const arm = () => {
+      if (quietTimer) clearTimeout(quietTimer);
+      quietTimer = setTimeout(done, quietMs);
+    };
+    const observer = new MutationObserver((records) => {
+      if (records.some((r) => r.addedNodes.length > 0 || r.removedNodes.length > 0)) arm();
+    });
+    const cap = setTimeout(done, maxMs);
+    observer.observe(root, { childList: true, subtree: true });
+    arm();
+  });
+}

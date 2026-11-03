@@ -45,45 +45,159 @@ export interface LabelResolutionExtras {
   fallbackToName?: boolean;
 }
 
-const DEFAULT_CONTAINER_SELECTORS = [
-  '.field-wrapper',
-  '.field',
-  '.form-group',
-  '.input-container',
-  '.select__container',
-  '.application-question',
-  '.application-additional',
-  '.card-field',
-  '[role="group"]',
-  'fieldset'
-];
 
 const DEFAULT_LABEL_SELECTORS = [
   'label',
   'legend',
   '.application-label',
   '.card-field-name',
+  '[class*="label"]',
+  '[class*="Label"]',
+  '[class*="question-title"]',
+  '[class*="questionTitle"]',
   '.label',
   'h3',
   'h4',
   'span.title'
 ];
 
+/**
+ * Descendants that are never part of the question: required markers, help/description,
+ * validation and "no results" messages, upload button captions, screen-reader duplicates.
+ */
+const NOISE_SELECTOR = [
+  '.required',
+  '[class*="asterisk"]',
+  '[class*="required-mark"]',
+  '[class*="error"]',
+  '[class*="Error"]',
+  '[class*="hint"]',
+  '[class*="help"]',
+  '[class*="description"]',
+  '[class*="Description"]',
+  '[class*="dropdown-no-results"]',
+  '[class*="no-results"]',
+  '[class*="resume-upload"]',
+  '[class*="default-label"]',
+  '[class*="filename"]',
+  '[aria-live]',
+  '[role="alert"]',
+  'svg',
+  'button',
+  'select',
+  'option',
+  'input',
+  'textarea',
+  'ul',
+  'ol'
+].join(', ');
+
+const CONTROL_QUERY = 'input:not([type="hidden"]), select, textarea, [role="combobox"], [contenteditable="true"]';
+
+/** Strips required markers and collapses whitespace. */
+export function cleanLabelText(text: string): string {
+  return (text || '')
+    .replace(/[✱＊]/g, '*')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*\*+\s*$/, ' *')
+    .trim();
+}
+
+/**
+ * Text of an element without its noise descendants (helper text, errors, nested controls,
+ * option lists). This is what stops Lever's "Current location ✱No location found..." and
+ * "Resume/CV ✱ATTACH RESUME/CV Couldn't auto-read resume" labels.
+ */
+export function ownText(el: Element | null | undefined): string {
+  if (!el) return '';
+  // Prefer an explicit label/text child (Lever: .application-label > .text).
+  const preferred = el.matches('.application-label, [class*="label"]')
+    ? el.querySelector(':scope > .text')
+    : el.querySelector(':scope > .application-label, :scope > [class*="label"]:not(input):not(select)');
+  const target = preferred && (preferred.textContent || '').trim() ? preferred : el;
+  const clone = target.cloneNode(true) as Element;
+  clone.querySelectorAll(NOISE_SELECTOR).forEach((n) => {
+    // Keep the "*" signal from required markers so callers can derive `required`.
+    if (n.matches('.required, [class*="asterisk"], [class*="required-mark"]')) {
+      n.replaceWith(clone.ownerDocument!.createTextNode(' *'));
+    } else {
+      n.remove();
+    }
+  });
+  return cleanLabelText(clone.textContent || '');
+}
+
 function textOf(el: Element | null | undefined): string {
-  return (el?.textContent || '').replace(/\s+/g, ' ').trim();
+  return ownText(el);
+}
+
+/** Controls that are part of the same field as `el` (its own group / search box / button pair). */
+function sameFieldControls(el: Element): Set<Element> {
+  const set = new Set<Element>([el]);
+  const name = el.getAttribute('name');
+  if (name) {
+    const root = el.closest('form') || el.ownerDocument;
+    root?.querySelectorAll(`[name="${escapeCss(name)}"]`).forEach((n) => set.add(n));
+  }
+  return set;
+}
+
+/**
+ * Finds the question text for a control by walking up to the smallest container that holds
+ * a label-like element and no other field's control. A label that is an option of this
+ * field (e.g. a radio's "Yes") is skipped.
+ */
+export function questionTextFor(
+  el: HTMLElement,
+  optionLabels: string[] = [],
+  extras: LabelResolutionExtras = {},
+  groupMembers: Element[] = []
+): string {
+  const own = sameFieldControls(el);
+  groupMembers.forEach((m) => own.add(m));
+  const optionSet = new Set(optionLabels.map((o) => cleanLabelText(o).toLowerCase()));
+  const labelSelectors = [...(extras.labelSelectors || []), ...DEFAULT_LABEL_SELECTORS].join(', ');
+  let node: Element | null = el.parentElement;
+  for (let depth = 0; depth < 7 && node; depth++) {
+    // Stop once the container clearly holds another field.
+    const controls = Array.from(node.querySelectorAll(CONTROL_QUERY)).filter((c) => !own.has(c) && !c.closest('[role="listbox"]'));
+    const foreign = controls.filter((c) => {
+      const t = (c.getAttribute('type') || '').toLowerCase();
+      return !(t === 'radio' || t === 'checkbox') || !own.has(c);
+    });
+    // Above the immediate parent, a container that also holds another field's control is
+    // shared between fields: its labels are not ours.
+    if (foreign.length > 0 && depth > 0) break;
+    const candidates = Array.from(node.querySelectorAll(labelSelectors)).filter((c) => {
+      if (c === el || c.contains(el) && c.tagName !== 'LABEL') return false;
+      const t = ownText(c);
+      if (!t || t.length < 2) return false;
+      if (optionSet.has(t.replace(/\s*\*$/, '').toLowerCase())) return false;
+      // A label wrapping one of this field's own option inputs is an option label, and a label
+      // wrapping some other field's control belongs to that field.
+      if (c.tagName === 'LABEL' && Array.from(own).some((o) => o !== el && c.contains(o))) return false;
+      if (Array.from(c.querySelectorAll(CONTROL_QUERY)).some((x) => !own.has(x))) return false;
+      if (c.tagName === 'LABEL' && c.querySelector('input[type="radio"], input[type="checkbox"]') && optionSet.size > 0) return false;
+      return true;
+    });
+    // Prefer a candidate that comes before the control in document order.
+    const before = candidates.filter((c) => c.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const pick = before[0] || candidates[0];
+    if (pick) return ownText(pick);
+    node = node.parentElement;
+  }
+  return '';
 }
 
 /**
  * Resolves the visible or accessible label text for a form control.
  * Shared by every adapter (eng review R12). Order:
- *  aria-label -> aria-labelledby (multi-id join) -> label[for] -> id-suffix labels ->
- *  wrapping label -> container heading -> ATS attribute lookup -> placeholder -> name.
- * The returned text keeps any "*" so callers can derive `required` from it.
+ *  aria-labelledby (multi-id join) -> label[for] -> id-suffix labels -> wrapping label's own
+ *  text -> question container (no foreign fields) -> aria-label -> ATS attribute lookup ->
+ *  placeholder -> name.
+ * The returned text keeps a trailing "*" when the field is marked required.
  */
 export function resolveFieldLabel(el: HTMLElement, doc: Document = document, extras: LabelResolutionExtras = {}): string {
-  const ariaLabel = el.getAttribute('aria-label');
-  if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
-
   const labelledBy = el.getAttribute('aria-labelledby');
   if (labelledBy) {
     const parts = labelledBy
@@ -105,20 +219,22 @@ export function resolveFieldLabel(el: HTMLElement, doc: Document = document, ext
       if (textOf(candidate)) return textOf(candidate);
     }
   }
+  // Some ATSs (Ashby) point label[for] at the field's name rather than an id.
+  const name = el.getAttribute('name');
+  if (name) {
+    const forName = doc.querySelector(`label[for="${escapeCss(name)}"]`);
+    if (textOf(forName)) return textOf(forName);
+  }
 
   const parentLabel = el.closest('label');
-  if (textOf(parentLabel)) return textOf(parentLabel);
+  if (parentLabel && textOf(parentLabel)) return textOf(parentLabel);
 
-  const containerSelectors = [...(extras.containerSelectors || []), ...DEFAULT_CONTAINER_SELECTORS];
-  const labelSelectors = [...(extras.labelSelectors || []), ...DEFAULT_LABEL_SELECTORS];
-  const container = el.closest(containerSelectors.join(', '));
-  if (container) {
-    for (const sel of labelSelectors) {
-      const candidates = Array.from(container.querySelectorAll(sel));
-      const heading = candidates.find((c) => !c.querySelector('input, select, textarea') || c === parentLabel);
-      if (textOf(heading)) return textOf(heading);
-    }
-  }
+  const ariaLabel = (el.getAttribute('aria-label') || '').trim();
+  const genericAria = /^(select one|select|search|toggle flyout|open|clear|choose|dropdown)$/i;
+  if (ariaLabel && !genericAria.test(ariaLabel)) return ariaLabel;
+
+  const question = questionTextFor(el, [], extras);
+  if (question) return question;
 
   if (extras.attributeLabel) {
     const attr = extras.attributeLabel(el, doc);
@@ -126,7 +242,9 @@ export function resolveFieldLabel(el: HTMLElement, doc: Document = document, ext
   }
 
   const placeholder = el.getAttribute('placeholder');
-  if (placeholder && placeholder.trim()) return placeholder.trim();
+  if (placeholder && placeholder.trim() && !/^(start typing|search|select|type here|choose)/i.test(placeholder.trim())) {
+    return placeholder.trim();
+  }
 
   if (extras.fallbackToName !== false) {
     return el.getAttribute('name') || '';
@@ -348,8 +466,8 @@ export function mapElementToCanonical(
       return { canonical: 'relocation', confidence: 0.85, source: 'label', reason: 'label:relocation' };
     }
 
-    // Referral source
-    if (/(how\s*did\s*you\s*hear|referral\s*source|where\s*did\s*you\s*find)/i.test(normLabel)) {
+    // Referral source ("how did you hear", "how you heard about", "where did you find/learn")
+    if (/(how|where)\s+(did\s+)?you\s+(first\s+)?(hear|heard|find|found|learn|learned|discover)\b|referral\s*source|heard\s+about\s+(us|this)|source\s+of\s+(application|referral)/i.test(normLabel)) {
       return { canonical: 'referral_source', confidence: 0.85, source: 'label', reason: 'label:referral_source' };
     }
 
@@ -358,8 +476,12 @@ export function mapElementToCanonical(
       return { canonical: 'salary_expectation', confidence: 0.85, source: 'label', reason: 'label:salary_expectation' };
     }
 
-    // Years of experience
-    if (/(years?\s*of\s*(professional\s*|relevant\s*|work\s*)?experience|how\s*many\s*years|total\s*experience)/i.test(normLabel)) {
+    // Years of experience (a number; "Do you have 4+ years of X?" is a yes/no question, not this)
+    if (
+      /(years?\s*of\s*(professional\s*|relevant\s*|work\s*)?experience|how\s*many\s*years|total\s*experience)/i.test(normLabel) &&
+      !/^(do|are|have|is|will|would|can)\b/i.test(normLabel) &&
+      !/\d+\s*\+?\s*years?/i.test(normLabel)
+    ) {
       return { canonical: 'years_experience', confidence: 0.85, source: 'label', reason: 'label:years_experience' };
     }
 
@@ -373,13 +495,18 @@ export function mapElementToCanonical(
       return { canonical: 'notice_period', confidence: 0.85, source: 'label', reason: 'label:notice_period' };
     }
 
-    // Pronouns
-    if (/(pronoun|preferred\s*pronoun)/i.test(normLabel)) {
+    // Preferred name (before first name and pronouns)
+    if (/^(preferred|nick)\s*(first\s*)?name\b|what would you like (us )?to call you/i.test(normLabel) && !/pronunc/i.test(normLabel)) {
+      return { canonical: 'first_name', confidence: 0.8, source: 'label', reason: 'label:preferred_name' };
+    }
+
+    // Pronouns (whole word: "pronounce" is not "pronouns")
+    if (/\bpronouns?\b/i.test(normLabel)) {
       return { canonical: 'pronouns', confidence: 0.85, source: 'label', reason: 'label:pronouns' };
     }
 
-    // EEO Race
-    if (/^(race|ethnicity|race\s*\/\s*ethnicity)/i.test(normLabel)) {
+    // EEO Race / ethnicity ("Which ethnicity(ies) do you identify with?")
+    if (/^(race|ethnicity|race\s*\/\s*ethnicity)/i.test(normLabel) || /\b(race|ethnicit(y|ies)|ethnic\s*(group|background|origin))\b/i.test(normLabel)) {
       return { canonical: 'eeo_race', confidence: 0.85, source: 'label', reason: 'label:eeo_race' };
     }
 
@@ -408,8 +535,8 @@ export function mapElementToCanonical(
       return { canonical: 'last_name', confidence: 0.85, source: 'label', reason: 'label:last_name' };
     }
 
-    // Full Legal Name
-    if (/(full\s*legal\s*name|full\s*name|^name$|your\s*name)/i.test(normLabel)) {
+    // Full Legal Name (not "how do you pronounce your name")
+    if (/(full\s*legal\s*name|full\s*name|^name$|your\s*name)/i.test(normLabel) && !/pronunc|pronounce|spell|phonetic/i.test(normLabel)) {
       return { canonical: 'full_name', confidence: 0.80, source: 'label', reason: 'label:full_name' };
     }
 
@@ -427,7 +554,11 @@ export function mapElementToCanonical(
     if (/(current\s*)?location/i.test(normLabel)) {
       return { canonical: 'location', confidence: 0.80, source: 'label', reason: 'label:location' };
     }
-    if (/^country(\s*\/?\s*region)?$/i.test(normLabel) || /country\s*(of\s*residence|\/\s*territory)/i.test(normLabel)) {
+    if (
+      /^country(\s*\/?\s*region)?$/i.test(normLabel) ||
+      /country\s*(of\s*residence|\/\s*territory)/i.test(normLabel) ||
+      /\b(which|what)\s+country\s+(do\s+you|are\s+you)\s+(live|reside|located|based|intend|plan|currently)/i.test(normLabel)
+    ) {
       return { canonical: 'country', confidence: 0.85, source: 'label', reason: 'label:country' };
     }
     if (/^city/i.test(normLabel)) {
@@ -446,13 +577,13 @@ export function mapElementToCanonical(
       return { canonical: 'address_line1', confidence: 0.80, source: 'label', reason: 'label:address_line1' };
     }
 
-    // Current Company
-    if (/(current\s*company|current\s*employer|company\s*name|organization)/i.test(normLabel)) {
+    // Current / most recent company
+    if (/((current|most\s*recent|latest|present)\s*(company|employer|organi[sz]ation)|^company\s*name$|^employer$)/i.test(normLabel)) {
       return { canonical: 'current_company', confidence: 0.80, source: 'label', reason: 'label:current_company' };
     }
 
-    // Current Title
-    if (/(current\s*title|current\s*role|job\s*title)/i.test(normLabel)) {
+    // Current / most recent title
+    if (/((current|most\s*recent|latest|present)\s*(job\s*)?(title|role|position)|^job\s*title$|^title$)/i.test(normLabel)) {
       return { canonical: 'current_title', confidence: 0.80, source: 'label', reason: 'label:current_title' };
     }
 
@@ -464,8 +595,10 @@ export function mapElementToCanonical(
     // Education: School / University (excludes open-ended memory/essay prompts or textareas)
     if (
       type !== 'textarea' &&
-      /(school|university|institution)(\s*name)?$/i.test(normLabel) &&
-      !/(memory|essay|tell us|why|describe)/i.test(normLabel)
+      (/(school|university|institution|college)(\s*name)?$/i.test(normLabel) ||
+        /\b(which|what|name of (your|the))\s+(university|school|college|institution)\b/i.test(normLabel) ||
+        /\b(university|school|college)\b.*\b(attend|attending|attended|enrolled|studying)\b/i.test(normLabel)) &&
+      !/(memory|essay|tell us|why|describe|city|location|country|state|graduat|gpa|major|degree)/i.test(normLabel)
     ) {
       return { canonical: 'education_school', confidence: 0.85, source: 'label', reason: 'label:education_school' };
     }

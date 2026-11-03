@@ -49,7 +49,8 @@ describe('Ashby Adapter & Autofill (Step 7)', () => {
     expect(customQuestions.length).toBeGreaterThanOrEqual(1);
 
     // Invariant 1: No submit controls returned
-    const submitControls = fields.filter(f => f.type as any === 'submit' || f.element.tagName === 'BUTTON');
+    // Yes/No toggle buttons (button_group) are answer controls, not submit controls.
+    const submitControls = fields.filter(f => f.type !== 'button_group' && (f.type as any === 'submit' || f.element.tagName === 'BUTTON'));
     expect(submitControls.length).toBe(0);
   });
 

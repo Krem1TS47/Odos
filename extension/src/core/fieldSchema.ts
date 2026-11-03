@@ -1,4 +1,5 @@
-import { Profile, StoredAnswer, StoredAnswerCategory, parseLocationString } from './models';
+import type { Profile, StoredAnswer, StoredAnswerCategory } from './models';
+import { parseLocationString } from './location';
 import { findStoredAnswerByKeywords } from './answerMatcher';
 
 /**

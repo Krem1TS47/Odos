@@ -26,15 +26,44 @@ export const ALL_ADAPTERS: AtsAdapter[] = [
   GENERIC_ADAPTER
 ];
 
+/** Hostnames that identify an ATS unambiguously. Checked before any DOM marker. */
+const ATS_HOSTS: Array<{ id: string; pattern: RegExp }> = [
+  { id: 'greenhouse', pattern: /(^|\.)(job-)?boards(\.eu)?\.greenhouse\.io$/i },
+  { id: 'lever', pattern: /(^|\.)jobs(\.eu)?\.lever\.co$/i },
+  { id: 'ashby', pattern: /(^|\.)jobs\.ashbyhq\.com$/i },
+  { id: 'workday', pattern: /\.(myworkdayjobs|myworkdaysite)\.com$|(^|\.)workday\.com$/i }
+];
+
+/** Iframe/script sources that mean the real form lives in a child frame. */
+const EMBEDDED_ATS_SRC = /(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|myworkdaysite\.com|smartrecruiters\.com|icims\.com|workable\.com)/i;
+
+/**
+ * True when this document only hosts an embedded ATS iframe: the fill must run in the
+ * iframe's own frame, never on the parent careers page.
+ */
+export function hostsEmbeddedAtsForm(doc: Document): boolean {
+  return Array.from(doc.querySelectorAll('iframe[src]')).some((f) => EMBEDDED_ATS_SRC.test(f.getAttribute('src') || ''));
+}
+
+/**
+ * Picks the adapter for this frame:
+ *   1. hostname match (authoritative; avoids Greenhouse claiming Lever's form#application-form)
+ *   2. DOM markers, most specific adapters first (Lever and Ashby before Greenhouse)
+ *   3. Generic
+ */
 export function findMatchingAdapter(url: URL, doc: Document): AtsAdapter | null {
-  // 1. Try specific ATS adapters first
-  for (const adapter of SPECIFIC_ADAPTERS) {
-    if (adapter.matches(url, doc)) {
-      return adapter;
-    }
+  const byHost = ATS_HOSTS.find((h) => h.pattern.test(url.hostname));
+  if (byHost) {
+    const adapter = SPECIFIC_ADAPTERS.find((a) => a.id === byHost.id);
+    if (adapter) return adapter;
   }
 
-  // 2. Fall back to Generic heuristic adapter if form fields exist
+  const markerOrder = ['workday', 'lever', 'ashby', 'greenhouse'];
+  for (const id of markerOrder) {
+    const adapter = SPECIFIC_ADAPTERS.find((a) => a.id === id);
+    if (adapter && adapter.matches(url, doc)) return adapter;
+  }
+
   if (GENERIC_ADAPTER.matches(url, doc)) {
     return GENERIC_ADAPTER;
   }

@@ -27,6 +27,10 @@ export interface ReviewPanelOptions {
   /** Fields the user filled by hand since discovery (offered for saving on submit). */
   getManualEdits?: () => ManualEdit[];
   onSaveAnswers?: (edits: ManualEdit[]) => Promise<void>;
+  /** Returns the run diagnostics as text for the "Copy diagnostics" action. */
+  getDiagnostics?: () => string;
+  /** Build identifier shown in the header so a stale extension load is obvious. */
+  buildId?: string;
 }
 
 function escapeHtml(text: string | undefined | null): string {
@@ -45,6 +49,7 @@ export class ReviewPanelController {
   private isExpanded: boolean = true;
   private activeTab: 'all' | 'needs_review' | 'filled' = 'all';
   private searchQuery: string = '';
+  private proposals: Array<{ field: FormField; value: string; state: 'pending' | 'saved' | 'dismissed' }> = [];
 
   constructor(options: ReviewPanelOptions) {
     this.options = options;
@@ -585,6 +590,75 @@ export class ReviewPanelController {
         .save-offer .offer-a {
           color: #52525b;
         }
+        .learn-box {
+          border: 1px solid #bfdbfe;
+          background: #eff6ff;
+          border-radius: 8px;
+          padding: 8px 10px;
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .learn-title {
+          font-size: 11px;
+          font-weight: 600;
+          color: #1e3a8a;
+        }
+        .learn-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .learn-text {
+          flex: 1;
+          min-width: 0;
+        }
+        .learn-q {
+          font-size: 11px;
+          color: #1e293b;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .learn-a {
+          font-size: 11px;
+          color: #475569;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .learn-btn {
+          width: 24px;
+          height: 24px;
+          border-radius: 6px;
+          border: 1px solid #1d4ed8;
+          background: #1d4ed8;
+          color: #fff;
+          cursor: pointer;
+          font-size: 12px;
+          flex-shrink: 0;
+        }
+        .learn-btn.secondary {
+          background: #fff;
+          color: #1d4ed8;
+        }
+        .learn-saved {
+          font-size: 11px;
+          color: #047857;
+          font-weight: 600;
+        }
+        .link-btn {
+          background: none;
+          border: none;
+          padding: 0;
+          margin-left: 6px;
+          color: #2563eb;
+          font-size: 11px;
+          cursor: pointer;
+          text-decoration: underline;
+          font-family: inherit;
+        }
       </style>
 
       ${
@@ -611,7 +685,7 @@ export class ReviewPanelController {
               <span class="odos-brand-pill">ODOS</span>
               <div class="odos-header-titles">
                 <div class="odos-title" title="${companyName}">${companyName}</div>
-                <div class="odos-subtitle">${atsLabel} ${confidenceText ? '&bull; ' + confidenceText : ''} ${isDuplicate ? '&bull; Re-fill' : ''}</div>
+                <div class="odos-subtitle">${atsLabel} ${confidenceText ? '&bull; ' + confidenceText : ''} ${isDuplicate ? '&bull; Re-fill' : ''}${this.options.buildId ? ' &bull; build ' + escapeHtml(this.options.buildId) : ''}</div>
               </div>
             </div>
             <div class="odos-header-actions">
@@ -634,6 +708,8 @@ export class ReviewPanelController {
             `
                 : ''
             }
+
+            ${this.renderProposals()}
 
             <div class="stat-grid">
               <div class="stat-box ${this.activeTab === 'all' ? 'active' : ''}" id="tab-all">
@@ -703,6 +779,7 @@ export class ReviewPanelController {
 
             <div class="invariant-notice">
               <strong>Human submission required:</strong> Odos does not click final submit buttons. Review your answers above and submit when ready.
+              ${this.options.getDiagnostics ? '<button type="button" id="btn-copy-diagnostics" class="link-btn" title="Copy what Odos saw and did on this page">Copy diagnostics</button>' : ''}
             </div>
 
             <div class="panel-actions">
@@ -777,6 +854,48 @@ export class ReviewPanelController {
         this.showSubmittedNotice();
       });
 
+      this.shadow.querySelectorAll<HTMLButtonElement>('button[data-learn]').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const p = this.proposals[Number(btn.getAttribute('data-proposal'))];
+          if (!p) return;
+          if (btn.getAttribute('data-learn') === 'dismiss') {
+            p.state = 'dismissed';
+            this.updateUI();
+            return;
+          }
+          btn.disabled = true;
+          try {
+            await this.options.onSaveAnswers?.([{ field: p.field, value: p.value }]);
+            p.state = 'saved';
+          } catch {
+            btn.disabled = false;
+          }
+          this.updateUI();
+        });
+      });
+
+      const diagBtn = this.shadow.getElementById('btn-copy-diagnostics') as HTMLButtonElement | null;
+      diagBtn?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!this.options.getDiagnostics) return;
+        const text = this.options.getDiagnostics();
+        try {
+          if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            diagBtn.textContent = 'Copied';
+          } else {
+            throw new Error('clipboard unavailable');
+          }
+        } catch {
+          console.log('[Odos] diagnostics\n' + text);
+          diagBtn.textContent = 'Printed to console';
+        }
+        setTimeout(() => {
+          diagBtn.textContent = 'Copy diagnostics';
+        }, 2000);
+      });
+
       const undoBtn = this.shadow.getElementById('btn-undo');
       undoBtn?.addEventListener('click', () => {
         if (this.options.onUndoPrefill) {
@@ -841,6 +960,52 @@ export class ReviewPanelController {
         });
       });
     }
+  }
+
+  /**
+   * Learning loop: the user answered a field Odos could not fill. Offer to remember it.
+   * The latest answer per field wins; dismissed proposals stay dismissed.
+   */
+  proposeAnswer(field: FormField, value: string): void {
+    const v = value.trim();
+    if (!v) return;
+    const existing = this.proposals.find((p) => p.field === field);
+    if (existing) {
+      if (existing.state === 'dismissed' || (existing.state === 'saved' && existing.value === v)) return;
+      existing.value = v;
+      existing.state = 'pending';
+    } else {
+      this.proposals.push({ field, value: v, state: 'pending' });
+    }
+    if (this.shadow && this.isExpanded) this.updateUI();
+  }
+
+  getPendingProposals(): ManualEdit[] {
+    return this.proposals.filter((p) => p.state === 'pending').map((p) => ({ field: p.field, value: p.value }));
+  }
+
+  private renderProposals(): string {
+    const visible = this.proposals.filter((p) => p.state !== 'dismissed');
+    if (visible.length === 0 || !this.options.onSaveAnswers) return '';
+    return `
+      <div class="learn-box">
+        <div class="learn-title">Remember for next time?</div>
+        ${visible
+          .map((p, i) => {
+            const idx = this.proposals.indexOf(p);
+            return `
+          <div class="learn-row" data-proposal="${idx}">
+            <div class="learn-text"><div class="learn-q">${escapeHtml(p.field.label)}</div><div class="learn-a">${escapeHtml(p.value)}</div></div>
+            ${
+              p.state === 'saved'
+                ? '<span class="learn-saved">Saved</span>'
+                : `<button type="button" class="learn-btn" data-learn="save" data-proposal="${idx}" title="Save this answer">✓</button>
+                   <button type="button" class="learn-btn secondary" data-learn="dismiss" data-proposal="${idx}" title="Don't save">✕</button>`
+            }
+          </div>`.replace(/\s+$/, '') + (i < visible.length - 1 ? '' : '');
+          })
+          .join('')}
+      </div>`;
   }
 
   /**
@@ -945,7 +1110,8 @@ export class ReviewPanelController {
     const body = this.shadow.querySelector('.odos-body');
     if (!body) return;
 
-    const edits = this.options.getManualEdits ? this.options.getManualEdits() : [];
+    const handled = new Set(this.proposals.filter((p) => p.state !== 'pending').map((p) => p.field));
+    const edits = (this.options.getManualEdits ? this.options.getManualEdits() : []).filter((e) => !handled.has(e.field));
     const offer =
       edits.length > 0 && this.options.onSaveAnswers
         ? `

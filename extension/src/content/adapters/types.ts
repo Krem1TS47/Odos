@@ -14,7 +14,8 @@ export type FormFieldType =
   | 'radio'
   | 'checkbox'
   | 'radio_group'
-  | 'checkbox_group';
+  | 'checkbox_group'
+  | 'button_group';
 
 /** How a dropdown is driven (eng review R2). */
 export type DropdownVariant = 'native' | 'searchable' | 'listbox-button' | 'datalist';
@@ -51,6 +52,8 @@ export interface FormField {
   optionSource?: Element | null;
   /** All inputs in a radio/checkbox group. */
   groupElements?: HTMLInputElement[];
+  /** Toggle buttons of a Yes/No style button group (Ashby). */
+  groupButtons?: HTMLElement[];
   /** Index of the repeatable row (education/experience) this field belongs to. */
   rowIndex?: number;
   /** Which repeatable section the field sits in, when detected. */

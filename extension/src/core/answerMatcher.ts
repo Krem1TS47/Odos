@@ -43,7 +43,18 @@ export function normalizeQuestion(text: string): string {
     .trim();
 }
 
+const IRREGULAR: Record<string, string> = {
+  heard: 'hear', found: 'find', learnt: 'learn', learned: 'learn', saw: 'see', seen: 'see',
+  am: 'be', was: 'be', were: 'be', older: 'old', years: 'year', yrs: 'year',
+  authorised: 'authorized', authorisation: 'authorization', organisation: 'organization',
+  us: 'us', usa: 'us', u: 'u'
+};
+
 function stem(token: string): string {
+  if (IRREGULAR[token]) return IRREGULAR[token];
+  if (token.length > 5 && token.endsWith('ing')) return token.slice(0, -3);
+  if (token.length > 4 && token.endsWith('ied')) return token.slice(0, -3) + 'y';
+  if (token.length > 4 && token.endsWith('ed') && !token.endsWith('eed')) return token.slice(0, -2);
   if (token.length > 4 && token.endsWith('ies')) return token.slice(0, -3) + 'y';
   if (token.length > 3 && token.endsWith('s') && !token.endsWith('ss')) return token.slice(0, -1);
   return token;
@@ -155,9 +166,11 @@ export function findStoredAnswerByKeywords(answers: StoredAnswer[], keywords: st
       const patternTokens = contentTokens(pattern);
       for (const kw of keywords) {
         const kwTokens = contentTokens(kw);
+        // Every keyword token must appear AND the keyword must cover at least half of the
+        // pattern: "availability" must not grab "12-week internship availability".
         if (kwTokens.length > 0 && isSubset(kwTokens, patternTokens)) {
           const score = kwTokens.length / Math.max(patternTokens.length, 1);
-          if (!best || score > best.score) best = { answer, score };
+          if (score >= 0.5 && (!best || score > best.score)) best = { answer, score };
         }
       }
     }

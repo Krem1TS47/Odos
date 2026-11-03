@@ -35,6 +35,7 @@ import {
   fillCheckbox,
   fillCheckboxGroup,
   fillCombobox,
+  fillButtonGroup,
   fillFileInput,
   fillRadioGroup,
   fillSelect,
@@ -298,6 +299,8 @@ export async function fillFieldWithValue(field: FormField, value: string, hintCa
       return fillRadioGroup(field.groupElements || [el as HTMLInputElement], value, hintCategory, field.options);
     case 'radio':
       return fillRadioGroup([el as HTMLInputElement], value, hintCategory, field.options);
+    case 'button_group':
+      return fillButtonGroup(field.groupButtons || [], value, hintCategory);
     case 'checkbox_group':
       return fillCheckboxGroup(field.groupElements || [el as HTMLInputElement], value, hintCategory, field.options);
     case 'checkbox':
