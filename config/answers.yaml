@@ -116,16 +116,3 @@ answers:
     answer: ""
     autofill: false
 
-  - category: motivation
-    patterns:
-      - "What are your greatest strengths?"
-      - "Key strengths"
-    answer: ""
-    autofill: false
-
-  - category: motivation
-    patterns:
-      - "What is your greatest accomplishment?"
-      - "Biggest professional achievement"
-    answer: ""
-    autofill: false
