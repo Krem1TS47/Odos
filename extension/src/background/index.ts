@@ -197,7 +197,45 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             app = await repository.createPrefilledApplication(job.id, message.payload.resumeId);
           }
 
-          sendResponse({ success: true, data: { job, application: app, isDuplicate } });
+          const dupCheck = await repository.checkDuplicateApplication({ url, company, title });
+          const alreadyApplied = dupCheck.isDuplicate || (app?.status === 'submitted');
+          const priorAudit = dupCheck.audit;
+
+          sendResponse({
+            success: true,
+            data: {
+              job,
+              application: app,
+              isDuplicate,
+              alreadyApplied,
+              priorAudit
+            }
+          });
+          break;
+        }
+
+        case 'CHECK_DUPLICATE_APPLICATION': {
+          const { url, company, title } = message.payload || {};
+          const result = await repository.checkDuplicateApplication({ url, company, title });
+          sendResponse({ success: true, data: result });
+          break;
+        }
+
+        case 'RECORD_APPLICATION_AUDIT': {
+          const audit = await repository.recordApplicationAudit(message.payload);
+          sendResponse({ success: true, data: { audit } });
+          break;
+        }
+
+        case 'LIST_APPLICATION_AUDITS': {
+          const audits = await repository.listApplicationAudits();
+          sendResponse({ success: true, data: { audits } });
+          break;
+        }
+
+        case 'DELETE_APPLICATION_AUDIT': {
+          await repository.deleteApplicationAudit(message.payload.id);
+          sendResponse({ success: true });
           break;
         }
 

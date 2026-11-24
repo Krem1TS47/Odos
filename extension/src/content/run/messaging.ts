@@ -3,7 +3,7 @@
  * Keeps chrome.runtime calls (and their failure modes) out of the run logic.
  */
 
-import { Application, Job, Profile, StoredAnswer, ResumeMetadata } from '../../core/models';
+import { Application, Job, Profile, StoredAnswer, ResumeMetadata, ApplicationAudit } from '../../core/models';
 import { SemanticDecision, SemanticRequest } from '../../core/semantic/types';
 import { OdosSettings, DEFAULT_SETTINGS } from '../../core/settings';
 
@@ -57,10 +57,30 @@ export async function getResumeFile(resumeId: string): Promise<ResumeFile | null
   return null;
 }
 
-export async function logPrefilledApplication(payload: { company?: string; title?: string; url: string; descriptionText?: string; resumeId?: string }): Promise<{ job: Job; application: Application; isDuplicate: boolean }> {
-  const resp = await send<{ job: Job; application: Application; isDuplicate: boolean }>({ type: 'LOG_PREFILLED_APPLICATION', payload });
+export async function logPrefilledApplication(payload: { company?: string; title?: string; url: string; descriptionText?: string; resumeId?: string }): Promise<{ job: Job; application: Application; isDuplicate: boolean; alreadyApplied?: boolean; priorAudit?: ApplicationAudit }> {
+  const resp = await send<{ job: Job; application: Application; isDuplicate: boolean; alreadyApplied?: boolean; priorAudit?: ApplicationAudit }>({ type: 'LOG_PREFILLED_APPLICATION', payload });
   if (!resp.success || !resp.data) throw new Error(resp.error || 'Failed to log application in local database.');
   return resp.data;
+}
+
+export async function checkDuplicateApplication(payload: { url: string; company?: string; title?: string }): Promise<{ isDuplicate: boolean; audit?: ApplicationAudit; application?: Application; job?: Job }> {
+  const resp = await send<{ isDuplicate: boolean; audit?: ApplicationAudit; application?: Application; job?: Job }>({ type: 'CHECK_DUPLICATE_APPLICATION', payload });
+  return resp.data ?? { isDuplicate: false };
+}
+
+export async function recordApplicationAudit(payload: Partial<ApplicationAudit> & { url: string; company: string; title: string }): Promise<ApplicationAudit | null> {
+  const resp = await send<{ audit: ApplicationAudit }>({ type: 'RECORD_APPLICATION_AUDIT', payload });
+  return resp.data?.audit ?? null;
+}
+
+export async function listApplicationAudits(): Promise<ApplicationAudit[]> {
+  const resp = await send<{ audits: ApplicationAudit[] }>({ type: 'LIST_APPLICATION_AUDITS' });
+  return resp.data?.audits ?? [];
+}
+
+export async function deleteApplicationAudit(id: string): Promise<boolean> {
+  const resp = await send({ type: 'DELETE_APPLICATION_AUDIT', payload: { id } });
+  return resp.success;
 }
 
 export async function getApplicationRecord(applicationId: string, jobId: string): Promise<{ job: Job; application: Application } | null> {

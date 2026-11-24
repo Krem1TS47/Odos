@@ -30,6 +30,14 @@ export interface ReviewPanelOptions {
   captcha?: CaptchaDetection;
   initialSnapshot?: Record<string, string>;
   isDuplicate?: boolean;
+  alreadyApplied?: boolean;
+  priorAudit?: {
+    appliedAt: string;
+    url?: string;
+    company?: string;
+    title?: string;
+  };
+  onOverrideProtection?: () => void;
   onConfirmSubmitted: () => void;
   onUndoPrefill?: () => void | Promise<void>;
   /** Fills a field from the panel (same filler as autofill); `remember` stores the answer. */
@@ -106,8 +114,18 @@ export class ReviewPanelController {
       emptyFields,
       failedFields = [],
       captcha,
-      isDuplicate
+      isDuplicate,
+      alreadyApplied,
+      priorAudit
     } = this.options;
+
+    const appliedDateStr = priorAudit?.appliedAt
+      ? new Date(priorAudit.appliedAt).toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric'
+        })
+      : '';
 
     const totalFields = filledFields.length + emptyFields.length + failedFields.length;
     const unverifiedCount = filledFields.filter((f) => f.status === 'unverified').length;
@@ -148,7 +166,7 @@ export class ReviewPanelController {
               <span class="odos-brand-pill">ODOS</span>
               <div class="odos-header-titles">
                 <div class="odos-title" title="${companyName}">${companyName}</div>
-                <div class="odos-subtitle">${atsLabel} ${confidenceText ? '&bull; ' + confidenceText : ''} ${isDuplicate ? '&bull; Re-fill' : ''}${this.options.buildId ? ' &bull; build ' + escapeHtml(this.options.buildId) : ''}</div>
+                <div class="odos-subtitle">${atsLabel} ${confidenceText ? '&bull; ' + confidenceText : ''} ${alreadyApplied ? '&bull; <span style="color:#d97706;font-weight:600;">Already Applied</span>' : isDuplicate ? '&bull; Re-fill' : ''}${this.options.buildId ? ' &bull; build ' + escapeHtml(this.options.buildId) : ''}</div>
               </div>
             </div>
             <div class="odos-header-actions">
@@ -158,6 +176,28 @@ export class ReviewPanelController {
           </div>
 
           <div class="odos-body">
+            ${
+              alreadyApplied
+                ? `
+              <div class="duplicate-alert">
+                <span class="duplicate-alert-icon">⚠️</span>
+                <div class="duplicate-alert-content">
+                  <div class="duplicate-alert-title">Duplicate Application Protected</div>
+                  <div class="duplicate-alert-desc">
+                    You already applied to this role${appliedDateStr ? ` on <strong>${escapeHtml(appliedDateStr)}</strong>` : ''}.
+                    Odos prevented autofill to protect against duplicate applications.
+                  </div>
+                  ${
+                    this.options.onOverrideProtection
+                      ? `<button class="btn-override-protection" id="btn-override-dup">Fill Anyway</button>`
+                      : ''
+                  }
+                </div>
+              </div>
+            `
+                : ''
+            }
+
             ${
               captcha?.present
                 ? `
@@ -347,6 +387,14 @@ export class ReviewPanelController {
         continueBtn.disabled = true;
         continueBtn.textContent = 'Continuing…';
         this.options.onContinue?.();
+      });
+
+      const overrideBtn = this.shadow.getElementById('btn-override-dup') as HTMLButtonElement | null;
+      overrideBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        overrideBtn.disabled = true;
+        overrideBtn.textContent = 'Filling…';
+        this.options.onOverrideProtection?.();
       });
 
       const diagBtn = this.shadow.getElementById('btn-copy-diagnostics') as HTMLButtonElement | null;

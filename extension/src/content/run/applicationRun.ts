@@ -105,6 +105,9 @@ export class ApplicationRun {
   private job!: Partial<Job>;
   private application!: Application;
   private isDuplicate = false;
+  private alreadyApplied = false;
+  private priorAudit?: any;
+  private protectionOverridden = false;
   private resumeFile: ResumeFile | null = null;
   private pages: PageRecord[] = [];
   private panel: ReviewPanelController | null = null;
@@ -129,7 +132,7 @@ export class ApplicationRun {
   }
 
   /** Starts a run (or resumes one carried across a page load). Returns a status line. */
-  async start(continuation?: RunContinuation): Promise<string> {
+  async start(continuation?: RunContinuation, overrideProtection = false): Promise<string> {
     const url = new URL(window.location.href);
     const adapter = findMatchingAdapter(url, document);
     if (!adapter) throw new Error('No supported ATS form detected on this page.');
@@ -156,11 +159,83 @@ export class ApplicationRun {
       this.job = logged.job;
       this.application = logged.application;
       this.isDuplicate = logged.isDuplicate;
+      this.alreadyApplied = Boolean(logged.alreadyApplied || logged.application?.status === 'submitted');
+      this.priorAudit = logged.priorAudit;
     }
 
     if (this.data.defaultResume?.id) this.resumeFile = await getResumeFile(this.data.defaultResume.id);
 
     this.observeConfirmation();
+
+    // Duplicate Application Protection: prevent autofilling if already applied to this role
+    if (this.alreadyApplied && !overrideProtection && !this.protectionOverridden) {
+      return this.handleDuplicateProtection();
+    }
+
+    return this.loop({ fillFirst: true });
+  }
+
+  /**
+   * Prevents autofill on already applied roles and displays the protection review panel.
+   */
+  private async handleDuplicateProtection(): Promise<string> {
+    await waitForSettle(document);
+    const discovered = this.adapter.discoverFields(document);
+    const detection = detectAts(window.location.href, document);
+    const captcha = this.adapter.detectCaptcha ? this.adapter.detectCaptcha(document) : detectPageCaptcha(document);
+
+    const emptyFill: PageFillResult = {
+      fields: discovered,
+      filledFields: [],
+      emptyFields: discovered,
+      failedFields: [],
+      snapshots: new Map(),
+      diagnostics: []
+    };
+    this.pages = [{ index: 0, title: this.adapter.navigation.pageTitle(document), fill: emptyFill }];
+
+    this.panel?.destroy();
+    this.panel = new ReviewPanelController({
+      job: this.job,
+      application: this.application,
+      detection,
+      atsName: this.adapter.name,
+      filledFields: [],
+      emptyFields: discovered,
+      captcha,
+      isDuplicate: this.isDuplicate,
+      alreadyApplied: this.alreadyApplied,
+      priorAudit: this.priorAudit,
+      onOverrideProtection: this.alreadyApplied ? () => void this.resumeWithOverride() : undefined,
+      alreadyApplied: true,
+      priorAudit: this.priorAudit,
+      onOverrideProtection: () => void this.resumeWithOverride(),
+      onConfirmSubmitted: () => this.markSubmitted(false),
+      onUndoPrefill: () => this.undoCurrentPage(),
+      onFillField: (field, value, remember) => this.fillFromPanel(field, value, remember),
+      getManualEdits: () => collectManualEdits(this.allFields, this.allSnapshots()),
+      onSaveAnswers: async (edits: ManualEdit[]) => {
+        for (const e of edits) await saveAnswer({ question: e.field.label, answer: e.value });
+      },
+      onClose: () => this.cancel(),
+      getDiagnostics: () => diagnosticsToText(buildDiagnostics({ fields: this.allFields, adapterId: this.adapter.id, url: window.location.href, version: extensionVersion() })),
+      buildId: BUILD_ID
+    });
+    this.panel.render();
+
+    this.lastStop = {
+      action: 'stop',
+      reason: 'already_applied',
+      message: describeStop('already_applied')
+    };
+
+    return 'Duplicate application protected. You already applied to this role.';
+  }
+
+  async resumeWithOverride(): Promise<string> {
+    this.protectionOverridden = true;
+    this.alreadyApplied = false;
+    this.cancelled = false;
     return this.loop({ fillFirst: true });
   }
 
@@ -289,6 +364,9 @@ export class ApplicationRun {
       emptyFields: page.fill.emptyFields,
       captcha,
       isDuplicate: this.isDuplicate,
+      alreadyApplied: this.alreadyApplied,
+      priorAudit: this.priorAudit,
+      onOverrideProtection: this.alreadyApplied ? () => void this.resumeWithOverride() : undefined,
       pageStatus: this.adapter.navigation.multiPage ? status : undefined,
       onContinue: status.canContinue ? () => void this.resume() : undefined,
       onConfirmSubmitted: () => this.markSubmitted(false),

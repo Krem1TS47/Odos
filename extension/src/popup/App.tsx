@@ -13,6 +13,7 @@ export const App: React.FC = () => {
   const [pageType, setPageType] = useState<'listing' | 'application' | 'unknown'>('unknown');
   const [jobInfo, setJobInfo] = useState<{ title?: string; company?: string } | null>(null);
   const [appCount, setAppCount] = useState<number>(0);
+  const [duplicateInfo, setDuplicateInfo] = useState<{ isDuplicate: boolean; audit?: any; application?: any } | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
 
@@ -26,6 +27,11 @@ export const App: React.FC = () => {
         const tab = tabs[0];
         if (tab?.url) {
           setCurrentUrl(tab.url);
+          repository.checkDuplicateApplication({ url: tab.url }).then((dup) => {
+            if (dup.isDuplicate) {
+              setDuplicateInfo(dup);
+            }
+          });
           if (tab.id) {
             chrome.tabs.sendMessage(tab.id, { type: 'GET_DETECTION' }, (response) => {
               if (response?.success && response.detection) {
@@ -189,6 +195,21 @@ export const App: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        {duplicateInfo?.isDuplicate && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-900 leading-snug flex items-start gap-2 shadow-xs">
+            <span className="text-amber-600 font-bold">⚠️</span>
+            <div>
+              <div className="font-semibold text-amber-950">Already Applied</div>
+              <div className="text-[10px] text-amber-800 mt-0.5">
+                You already applied to this role
+                {duplicateInfo.audit?.appliedAt
+                  ? ` on ${new Date(duplicateInfo.audit.appliedAt).toLocaleDateString()}`
+                  : ''}. Duplicate protection is active.
+              </div>
+            </div>
+          </div>
+        )}
 
         {statusMessage && (
           <div className="rounded-md border border-border bg-muted/60 p-2.5 text-[11px] text-foreground leading-relaxed flex items-start gap-1.5">

@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Job, Application, Profile, StoredAnswer } from '../models';
+import type { Job, Application, Profile, StoredAnswer, ApplicationAudit } from '../models';
 
 export interface ResumeBlobRecord {
   id: string; // matches ResumeMetadata.id
@@ -20,6 +20,7 @@ export class OdosDatabase extends Dexie {
   profile!: Table<ProfileRecord, string>;
   answers!: Table<StoredAnswer, string>;
   resumeBlobs!: Table<ResumeBlobRecord, string>;
+  applicationAudits!: Table<ApplicationAudit, string>;
 
   constructor(dbName = 'OdosDB') {
     super(dbName);
@@ -29,6 +30,9 @@ export class OdosDatabase extends Dexie {
       profile: 'key',
       answers: 'id, category, autoFill, *questionPatterns',
       resumeBlobs: 'id'
+    });
+    this.version(2).stores({
+      applicationAudits: 'id, url, canonicalUrl, company, title, appliedAt, applicationId, jobId'
     });
   }
 }

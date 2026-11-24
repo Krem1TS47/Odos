@@ -10,8 +10,11 @@ import {
   Application,
   ApplicationSchema,
   ApplicationStatus,
-  ApplicationEvent
+  ApplicationEvent,
+  ApplicationAudit,
+  ApplicationAuditSchema
 } from '../models';
+import { canonicalizeJobUrl, isSameJobUrl, generateDedupeKey } from '../dedupe';
 
 async function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   if (typeof blob.arrayBuffer === 'function') {
@@ -406,6 +409,26 @@ export class StorageRepository {
 
     const validated = ApplicationSchema.parse(app);
     await this.db.applications.put(validated);
+
+    if (newStatus === 'submitted') {
+      try {
+        const job = await this.db.jobs.get(app.jobId);
+        if (job) {
+          await this.recordApplicationAudit({
+            url: job.url,
+            company: job.company,
+            title: job.title,
+            appliedAt: app.submittedAt || new Date().toISOString(),
+            applicationId: app.id,
+            jobId: job.id,
+            source: 'manual'
+          });
+        }
+      } catch (auditErr) {
+        console.warn('[Odos] Failed to record application audit entry on status update:', auditErr);
+      }
+    }
+
     return validated;
   }
 
@@ -434,6 +457,24 @@ export class StorageRepository {
 
     const validated = ApplicationSchema.parse(app);
     await this.db.applications.put(validated);
+
+    try {
+      const job = await this.db.jobs.get(app.jobId);
+      if (job) {
+        await this.recordApplicationAudit({
+          url: job.url,
+          company: job.company,
+          title: job.title,
+          appliedAt: app.submittedAt || new Date().toISOString(),
+          applicationId: app.id,
+          jobId: job.id,
+          source: 'extension'
+        });
+      }
+    } catch (auditErr) {
+      console.warn('[Odos] Failed to record application audit entry on submit:', auditErr);
+    }
+
     return validated;
   }
 
@@ -461,19 +502,134 @@ export class StorageRepository {
   }
 
   // ==========================================
+  // AUDIT OPERATIONS (Applied Links / Duplicates)
+  // ==========================================
+
+  async recordApplicationAudit(
+    audit: Partial<ApplicationAudit> & { url: string; company: string; title: string }
+  ): Promise<ApplicationAudit> {
+    const canonicalUrl = audit.canonicalUrl || canonicalizeJobUrl(audit.url);
+    const existing = await this.db.applicationAudits.where('canonicalUrl').equals(canonicalUrl).first();
+
+    const record: ApplicationAudit = {
+      id: existing?.id || audit.id || crypto.randomUUID(),
+      url: audit.url,
+      canonicalUrl,
+      company: audit.company.trim(),
+      title: audit.title.trim(),
+      appliedAt: audit.appliedAt || new Date().toISOString(),
+      applicationId: audit.applicationId || existing?.applicationId,
+      jobId: audit.jobId || existing?.jobId,
+      source: audit.source || existing?.source || 'extension',
+      notes: audit.notes ?? existing?.notes ?? ''
+    };
+
+    const validated = ApplicationAuditSchema.parse(record);
+    await this.db.applicationAudits.put(validated);
+    return validated;
+  }
+
+  async findAuditByUrl(url: string): Promise<ApplicationAudit | undefined> {
+    if (!url) return undefined;
+    const canonical = canonicalizeJobUrl(url);
+    const byCanonical = await this.db.applicationAudits.where('canonicalUrl').equals(canonical).first();
+    if (byCanonical) return byCanonical;
+
+    // Fallback: check across all audits if any match using isSameJobUrl
+    const all = await this.db.applicationAudits.toArray();
+    return all.find((a) => isSameJobUrl(a.url, url) || isSameJobUrl(a.canonicalUrl, url));
+  }
+
+  async checkDuplicateApplication(params: {
+    url: string;
+    company?: string;
+    title?: string;
+  }): Promise<{ isDuplicate: boolean; audit?: ApplicationAudit; application?: Application; job?: Job }> {
+    if (!params.url) return { isDuplicate: false };
+
+    // 1. Check applicationAudits
+    const audit = await this.findAuditByUrl(params.url);
+    if (audit) {
+      let app: Application | undefined;
+      let job: Job | undefined;
+      if (audit.applicationId) app = await this.db.applications.get(audit.applicationId);
+      if (audit.jobId) job = await this.db.jobs.get(audit.jobId);
+      return { isDuplicate: true, audit, application: app, job };
+    }
+
+    // 2. Check submitted applications in applications table
+    const targetCanonical = canonicalizeJobUrl(params.url);
+    const allJobs = await this.db.jobs.toArray();
+    for (const j of allJobs) {
+      if (isSameJobUrl(j.url, params.url) || canonicalizeJobUrl(j.url) === targetCanonical) {
+        const app = await this.getApplicationByJobId(j.id);
+        if (app && app.status === 'submitted') {
+          // Found an already submitted application; auto-record an audit entry
+          const newAudit = await this.recordApplicationAudit({
+            url: j.url,
+            company: j.company,
+            title: j.title,
+            appliedAt: app.submittedAt || app.prefilledAt,
+            applicationId: app.id,
+            jobId: j.id,
+            source: 'auto_detection'
+          });
+          return { isDuplicate: true, audit: newAudit, application: app, job: j };
+        }
+      }
+    }
+
+    // 3. If company and title are provided, check dedupe key
+    if (params.company && params.title) {
+      const dedupeKey = generateDedupeKey(params.company, params.title, params.url);
+      const jobByKey = await this.findJobByDedupeKey(dedupeKey);
+      if (jobByKey) {
+        const app = await this.getApplicationByJobId(jobByKey.id);
+        if (app && app.status === 'submitted') {
+          const newAudit = await this.recordApplicationAudit({
+            url: jobByKey.url,
+            company: jobByKey.company,
+            title: jobByKey.title,
+            appliedAt: app.submittedAt || app.prefilledAt,
+            applicationId: app.id,
+            jobId: jobByKey.id,
+            source: 'auto_detection'
+          });
+          return { isDuplicate: true, audit: newAudit, application: app, job: jobByKey };
+        }
+      }
+    }
+
+    return { isDuplicate: false };
+  }
+
+  async listApplicationAudits(): Promise<ApplicationAudit[]> {
+    return this.db.applicationAudits.orderBy('appliedAt').reverse().toArray();
+  }
+
+  async deleteApplicationAudit(id: string): Promise<void> {
+    await this.db.applicationAudits.delete(id);
+  }
+
+  async clearApplicationAudits(): Promise<void> {
+    await this.db.applicationAudits.clear();
+  }
+
+  // ==========================================
   // WIPE ALL DATA
   // ==========================================
 
   async wipeAllData(): Promise<void> {
     await this.db.transaction(
       'rw',
-      [this.db.jobs, this.db.applications, this.db.profile, this.db.answers, this.db.resumeBlobs],
+      [this.db.jobs, this.db.applications, this.db.profile, this.db.answers, this.db.resumeBlobs, this.db.applicationAudits],
       async () => {
         await this.db.jobs.clear();
         await this.db.applications.clear();
         await this.db.profile.clear();
         await this.db.answers.clear();
         await this.db.resumeBlobs.clear();
+        await this.db.applicationAudits.clear();
       }
     );
   }

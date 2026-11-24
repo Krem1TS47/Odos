@@ -11,11 +11,11 @@ import { RunContinuation } from './run/messaging';
 
 let activeRun: ApplicationRun | null = null;
 
-async function runOdos(continuation?: RunContinuation): Promise<string> {
+async function runOdos(continuation?: RunContinuation, overrideProtection?: boolean): Promise<string> {
   if (activeRun?.isRunning) return 'Odos is already working on this page.';
   activeRun?.cancel();
   activeRun = new ApplicationRun();
-  return activeRun.start(continuation);
+  return activeRun.start(continuation, overrideProtection);
 }
 
 function registerMessageListener(): void {
@@ -23,7 +23,7 @@ function registerMessageListener(): void {
     if (message.type === 'RUN_ODOS') {
       // Frames without an application form stay silent so the frame that has one answers.
       if (!looksLikeApplicationForm(document)) return false;
-      runOdos(message.continuation)
+      runOdos(message.continuation, message.overrideProtection)
         .then((status) => sendResponse({ success: true, status }))
         .catch((err) => sendResponse({ success: false, error: err?.message || String(err) }));
       return true;

@@ -188,6 +188,54 @@ export const PANEL_CSS = `
           line-height: 1.4;
           flex-shrink: 0;
         }
+        .duplicate-alert {
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          border-radius: 8px;
+          padding: 9px 12px;
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          font-size: 12px;
+          color: #92400e;
+          line-height: 1.4;
+          flex-shrink: 0;
+        }
+        .duplicate-alert-icon {
+          font-size: 15px;
+          flex-shrink: 0;
+        }
+        .duplicate-alert-content {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          flex: 1;
+        }
+        .duplicate-alert-title {
+          font-weight: 600;
+          color: #78350f;
+          font-size: 12px;
+        }
+        .duplicate-alert-desc {
+          color: #92400e;
+          font-size: 11px;
+        }
+        .btn-override-protection {
+          align-self: flex-start;
+          margin-top: 4px;
+          background: #78350f;
+          color: #ffffff;
+          border: none;
+          padding: 4px 10px;
+          border-radius: 5px;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+        .btn-override-protection:hover {
+          background: #5c2709;
+        }
         .stat-grid {
           display: grid;
           grid-template-columns: repeat(3, 1fr);

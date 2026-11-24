@@ -24,7 +24,8 @@ export type StopReason =
   | 'did_not_advance'
   | 'page_limit'
   | 'auto_advance_off'
-  | 'cancelled';
+  | 'cancelled'
+  | 'already_applied';
 
 export interface PageNavigator {
   /** False for ATSs whose application is a single page. */
@@ -198,5 +199,7 @@ export function describeStop(reason: StopReason, detail: { required?: number; er
       return 'Automatic page advance is off (Dashboard → Settings). Click Next yourself and run Odos again.';
     case 'cancelled':
       return 'Stopped.';
+    case 'already_applied':
+      return 'Duplicate application protected. You have already applied to this role.';
   }
 }
